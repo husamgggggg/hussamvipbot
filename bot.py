@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Husaam Trader Bot — النسخة النهائية الكاملة
+Abood Trader Bot — النسخة النهائية الكاملة
 ✅ صفقة 60 ثانية ثابتة بدون marginal
 ✅ تحليل شمعات حقيقية من أسعار Quotex الحية
 ✅ حساب ربح/خسارة من رصيد المنصة الفعلي
@@ -125,7 +125,7 @@ logging.basicConfig(
         logging.FileHandler("logs/bot.log", encoding="utf-8"),
     ],
 )
-log = logging.getLogger("HusaamTrader")
+log = logging.getLogger("AboodTrader")
 
 
 def _configure_quiet_loggers():
@@ -2190,7 +2190,7 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
 # ══════════════════════════════════════════════════════════════════════════════
 # FastAPI
 # ══════════════════════════════════════════════════════════════════════════════
-app = FastAPI(title="Husaam Trader")
+app = FastAPI(title="Abood Trader")
 app.add_middleware(CORSMiddleware, allow_origins=ALLOWED_ORIGINS,
                    allow_methods=["*"], allow_headers=["*"])
 
@@ -2503,7 +2503,7 @@ async def status(token: str=""):
 
 if __name__ == "__main__":
     log.info("ℹ️ للجلسات وPIN: شغّل عملية واحدة فقط (worker واحد) حتى لا تُفقد SESSIONS بين الطلبات")
-    log.info("🚀 Husaam Trader — http://localhost:8000")
+    log.info("🚀 Abood Trader — http://localhost:8000")
     log.info("👤 Admin: http://localhost:8000/admin")
     log.info(f"🌐 CORS origins: {ALLOWED_ORIGINS}")
     log.info(f"📦 pyquotex: {'✅' if QX else '❌ محاكاة'}")
