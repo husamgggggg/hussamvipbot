@@ -470,7 +470,7 @@ h1{font-size:18px;}
   </div>
   <div class="lbox" id="pinBox" style="display:none;margin-top:12px">
     <div class="pinbox"><div class="icon">HT</div><h2>رمز التحقق</h2><p class="sub">أرسل Quotex رمزاً إلى<br><span id="pinEmail" style="color:var(--g);font-weight:700"></span></p></div>
-    <div class="fg"><label>رمز PIN</label><input type="number" id="iPin" placeholder="123456" style="text-align:center;font-size:26px;font-weight:900;letter-spacing:10px"></div>
+    <div class="fg"><label>رمز PIN</label><input type="text" id="iPin" inputmode="numeric" pattern="[0-9]*" autocomplete="one-time-code" placeholder="123456" style="text-align:center;font-size:26px;font-weight:900;letter-spacing:10px"></div>
     <button class="pbtn" id="pinBtn" onclick="doPin()">تأكيد الرمز</button>
     <p class="lnk" onclick="backLogin()">← العودة</p>
   </div>
@@ -752,9 +752,9 @@ async function doLogin(){
   afterLogin(d);
 }
 async function doPin(){
-  const pin=document.getElementById('iPin').value.trim();if(!pin||pin.length<4)return toast('أدخل PIN كامل','er');
+  const pin=(document.getElementById('iPin').value||'').replace(/\D/g,'');if(!pin||pin.length<4)return toast('أدخل PIN كامل','er');
   const btn=document.getElementById('pinBtn');btn.disabled=true;btn.textContent='⏳ جارٍ التحقق...';
-  const d=await api('/pin','POST',{pin,token:s.token});
+  const d=await api('/pin','POST',{pin:String(pin),token:s.token});
   btn.disabled=false;btn.textContent='تأكيد الرمز';
   if(!d)return toast('تعذر الاتصال بالخادم','er');
   if(!d.success)return toast(d.detail||d.message||'PIN خاطئ','er');

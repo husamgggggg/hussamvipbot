@@ -8,7 +8,7 @@ Husaam Trader Bot — النسخة النهائية الكاملة
 ✅ متعدد المشتركين كل بحسابه المستقل
 ✅ إشعار عند تحقق الهدف
 """
-import asyncio, json, logging, os, queue, random
+import asyncio, json, logging, os, queue, random, re
 import secrets, threading, time, traceback
 from datetime import datetime, timezone
 
@@ -211,6 +211,15 @@ def get_pin_q(email):
         _pin_queues[email] = queue.Queue()
     return _pin_queues[email]
 
+def drain_pin_queue(email):
+    """تفريغ رموز قديمة في الطابور حتى لا يُستهلك رمز خاطئ قبل طلب جديد."""
+    q = get_pin_q(email)
+    while True:
+        try:
+            q.get_nowait()
+        except queue.Empty:
+            break
+
 def make_pin_input(email, S):
     def _f(prompt=""):
         log.info(f"🔐 PIN مطلوب: {email}")
@@ -218,7 +227,9 @@ def make_pin_input(email, S):
         try:
             pin = get_pin_q(email).get(timeout=120)
             S["needs_pin"] = False
-            return pin
+            if pin is None:
+                return ""
+            return re.sub(r"\D", "", str(pin).strip()) or str(pin).strip()
         except queue.Empty:
             S["needs_pin"] = False
             return ""
@@ -1707,6 +1718,13 @@ async def _login_qx(email, password, S):
             p = await client.get_profile()
             cur = _extract_currency(p)
         except: pass
+        # عند إرجاع needs_pin مبكراً من /api/login لا يُكمَل الهاندلر — يجب حفظ الجلسة هنا بعد نجاح connect + الأرصدة
+        S["real_balance"] = real
+        S["demo_balance"] = demo
+        S["currency"] = cur
+        S["logged_in"] = True
+        S["needs_pin"] = False
+        S["email"] = email
         return {"ok":True,"client":client,"real":real,"demo":demo,"cur":cur}
     except Exception as e:
         log.error(traceback.format_exc())
@@ -2312,6 +2330,7 @@ async def login(req: LoginReq):
             except: pass
         S["email"] = req.email
         S["needs_pin"] = False
+        drain_pin_queue(req.email)
         # connect() يستدعي input() ويُعلّق على queue حتى يصل PIN من /api/pin.
         # إذا انتظرنا result(150) هنا، لا تُرسل الاستجابة أبداً → الواجهة لا تظهر حقل PIN.
         _loop = get_session_loop(req.email)
@@ -2367,23 +2386,24 @@ async def login(req: LoginReq):
 async def pin_ep(req: PinReq):
     S = get_session(req.token)
     if not S: raise HTTPException(403,"جلسة غير صالحة")
-    p = req.pin.strip()
-    if len(p)<4: raise HTTPException(400,"PIN قصير")
+    p = re.sub(r"\D", "", str(req.pin or "").strip())
+    if len(p) < 4:
+        raise HTTPException(400,"PIN قصير")
     if not QX:
         S["logged_in"]=True; S["needs_pin"]=False
         return {"success":True,"email":S["email"],"user_id":12345678,
                 "real_balance":0.0,"demo_balance":10_000.0,"currency":"USD","sim_mode":True}
     get_pin_q(S["email"]).put(p)
-    for _ in range(30):
-        await asyncio.sleep(1)
-        if S["logged_in"]:
+    # لا نستخدم needs_pin للحكم على «خطأ»: يُصفَّر فور سحب الرمز من الطابور قبل انتهاء connect().
+    deadline = time.monotonic() + 120
+    while time.monotonic() < deadline:
+        if S.get("logged_in") and S.get("client"):
             return {"success":True,"email":S["email"],
                     "user_id":abs(hash(S["email"]))%90_000_000+10_000_000,
                     "real_balance":S["real_balance"],"demo_balance":S["demo_balance"],
                     "currency":S["currency"],"sim_mode":_is_session_sim_mode(S)}
-        if not S["needs_pin"] and not S["logged_in"]:
-            raise HTTPException(401,"PIN خاطئ")
-    raise HTTPException(408,"انتهت المهلة")
+        await asyncio.sleep(0.25)
+    raise HTTPException(408,"انتهت مهلة التحقق — تحقق من الرمز أو أعد تسجيل الدخول")
 
 @app.post("/api/logout")
 async def logout(req: TokenReq):
