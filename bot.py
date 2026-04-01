@@ -2215,6 +2215,11 @@ async def pwa_screenshot_wide():
     return _static_file("screenshot-wide.png", "image/png")
 
 
+@app.get("/screenshot-narrow.png")
+async def pwa_screenshot_narrow():
+    return _static_file("screenshot-narrow.png", "image/png")
+
+
 @app.get("/sw.js")
 async def service_worker():
     return _static_file("sw.js", "application/javascript")

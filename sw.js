@@ -1,10 +1,12 @@
-/* Abood Trader — كاش للأصول الثابتة + JS/CSS؛ HTML شبكة أولاً ثم احتياط عند انقطاع الاتصال؛ /api دائماً من الشبكة */
-const CACHE = 'abood-static-v3';
+/* Abood Trader — PWA offline: precache HTML + static assets; stale-while-revalidate for JS/CSS; /api network-only */
+const CACHE = 'abood-static-v5';
 const PRECACHE = [
+  '/',
   '/manifest.json',
   '/icon-192.png',
   '/icon-512.png',
   '/screenshot-wide.png',
+  '/screenshot-narrow.png',
 ];
 
 function staleWhileRevalidate(req) {
