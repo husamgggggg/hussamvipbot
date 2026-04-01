@@ -2171,8 +2171,17 @@ app.add_middleware(CORSMiddleware, allow_origins=ALLOWED_ORIGINS,
 async def _startup_quiet_logs():
     _configure_quiet_loggers()
 
-_fe = os.path.join(os.path.dirname(__file__), "frontend.html")
-_ad = os.path.join(os.path.dirname(__file__), "admin.html")
+_DIR = os.path.dirname(__file__)
+_fe = os.path.join(_DIR, "frontend.html")
+_ad = os.path.join(_DIR, "admin.html")
+_STATIC = os.path.join(_DIR, "static")
+
+
+def _static_file(rel: str, media_type: str):
+    p = os.path.join(_STATIC, rel)
+    if not os.path.isfile(p):
+        raise HTTPException(404, "الملف غير موجود")
+    return FileResponse(p, media_type=media_type)
 HTML  = open(_fe,encoding="utf-8").read() if os.path.exists(_fe) else "<h1>frontend.html مفقود</h1>"
 ADMIN = open(_ad,encoding="utf-8").read() if os.path.exists(_ad) else "<h1>admin.html مفقود</h1>"
 
@@ -2185,10 +2194,30 @@ async def admin_ui(): return ADMIN
 
 @app.get("/manifest.json")
 async def manifest_json():
-    p = os.path.join(os.path.dirname(__file__), "manifest.json")
+    p = os.path.join(_DIR, "manifest.json")
     if not os.path.isfile(p):
         raise HTTPException(404, "manifest غير موجود")
     return FileResponse(p, media_type="application/manifest+json")
+
+
+@app.get("/icon-192.png")
+async def pwa_icon_192():
+    return _static_file("icon-192.png", "image/png")
+
+
+@app.get("/icon-512.png")
+async def pwa_icon_512():
+    return _static_file("icon-512.png", "image/png")
+
+
+@app.get("/screenshot-wide.png")
+async def pwa_screenshot_wide():
+    return _static_file("screenshot-wide.png", "image/png")
+
+
+@app.get("/sw.js")
+async def service_worker():
+    return _static_file("sw.js", "application/javascript")
 
 # ── Admin ─────────────────────────────────────────────────────────────────────
 @app.post("/api/admin/login")
