@@ -2311,10 +2311,35 @@ async def login(req: LoginReq):
             try: run_async_for(req.email, _close(S["client"]),5)
             except: pass
         S["email"] = req.email
-        r = run_async_for(req.email, _login_qx(req.email,req.password,S), 150)
+        S["needs_pin"] = False
+        # connect() يستدعي input() ويُعلّق على queue حتى يصل PIN من /api/pin.
+        # إذا انتظرنا result(150) هنا، لا تُرسل الاستجابة أبداً → الواجهة لا تظهر حقل PIN.
+        _loop = get_session_loop(req.email)
+        _fut = asyncio.run_coroutine_threadsafe(
+            _login_qx(req.email, req.password, S), _loop
+        )
+        _deadline = time.monotonic() + 150
+        r = None
+        while time.monotonic() < _deadline:
+            if _fut.done():
+                try:
+                    r = _fut.result()
+                except Exception as e:
+                    log.exception("login: نتيجة مهمة الدخول")
+                    raise HTTPException(500, str(e) or "فشل تسجيل الدخول")
+                break
+            if S.get("needs_pin"):
+                return {
+                    "success": False,
+                    "needs_pin": True,
+                    "message": "أدخل رمز التحقق (PIN) المرسل إلى بريدك أو تطبيق Quotex",
+                }
+            await asyncio.sleep(0.15)
+        else:
+            raise HTTPException(408, "انتهت مهلة تسجيل الدخول — أعد المحاولة")
         if r.get("pin"):
             S["needs_pin"]=True
-            return {"success":False,"needs_pin":True,"message":r["msg"]}
+            return {"success":False,"needs_pin":True,"message":r.get("msg") or "أدخل PIN"}
         if not r["ok"]:
             msg = str(r.get("msg","فشل"))
             # عند فشل Quotex لا ندخل محاكاة تلقائياً: يجب أن يكون الدخول حقيقي فقط.

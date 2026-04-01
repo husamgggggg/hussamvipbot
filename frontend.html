@@ -741,7 +741,13 @@ async function doLogin(){
   const d=await api('/login','POST',{email,password:pw,token:s.token});
   btn.disabled=false;btn.textContent='تسجيل الدخول';
   if(!d)return toast('تعذر الاتصال بالخادم','er');
-  if(d.needs_pin){document.getElementById('loginBox').style.display='none';document.getElementById('pinBox').style.display='block';document.getElementById('pinEmail').textContent=email;return toast('تحقق من بريدك الإلكتروني','wa');}
+  if(d.needs_pin){
+    document.getElementById('loginBox').style.display='none';
+    document.getElementById('pinBox').style.display='block';
+    document.getElementById('pinEmail').textContent=email;
+    const pe=document.getElementById('iPin');if(pe){pe.value='';requestAnimationFrame(()=>{pe.focus();pe.scrollIntoView({block:'nearest',behavior:'smooth'});});}
+    return toast('أدخل رمز PIN من البريد أو تطبيق Quotex','wa');
+  }
   if(!d.success)return toast(d.detail||d.message||'فشل','er');
   afterLogin(d);
 }
