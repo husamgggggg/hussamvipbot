@@ -1,11 +1,30 @@
-/* Abood Trader — كاش للأصول الثابتة فقط؛ /api والصفحات دائماً من الشبكة */
-const CACHE = 'abood-static-v2';
+/* Abood Trader — كاش للأصول الثابتة + JS/CSS؛ HTML شبكة أولاً ثم احتياط عند انقطاع الاتصال؛ /api دائماً من الشبكة */
+const CACHE = 'abood-static-v3';
 const PRECACHE = [
   '/manifest.json',
   '/icon-192.png',
   '/icon-512.png',
   '/screenshot-wide.png',
 ];
+
+function staleWhileRevalidate(req) {
+  return caches.match(req).then((hit) => {
+    const network = fetch(req).then((res) => {
+      if (res && res.ok)
+        caches.open(CACHE).then((c) => c.put(req, res.clone())).catch(() => {});
+      return res;
+    });
+    if (hit) {
+      network.catch(() => {});
+      return hit;
+    }
+    return network;
+  });
+}
+
+function isRuntimeStaticAsset(pathname) {
+  return /\.(?:js|css|woff2?)$/i.test(pathname);
+}
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -44,33 +63,25 @@ self.addEventListener('fetch', (event) => {
     return;
   }
   if (req.mode === 'navigate' || (req.headers.get('accept') || '').includes('text/html')) {
-    event.respondWith(fetch(req));
+    event.respondWith(
+      fetch(req)
+        .then((res) => {
+          if (res && res.ok) {
+            const copy = res.clone();
+            caches.open(CACHE).then((c) => c.put(req, copy)).catch(() => {});
+          }
+          return res;
+        })
+        .catch(() => caches.match(req))
+    );
     return;
   }
 
   const path = url.pathname;
-  const useCache = PRECACHE.includes(path);
-  if (!useCache) {
-    event.respondWith(fetch(req));
+  if (PRECACHE.includes(path) || isRuntimeStaticAsset(path)) {
+    event.respondWith(staleWhileRevalidate(req));
     return;
   }
 
-  event.respondWith(
-    caches.match(req).then((hit) => {
-      if (hit) {
-        fetch(req)
-          .then((res) => {
-            if (res && res.ok)
-              caches.open(CACHE).then((c) => c.put(req, res.clone()));
-          })
-          .catch(() => {});
-        return hit;
-      }
-      return fetch(req).then((res) => {
-        if (res && res.ok)
-          caches.open(CACHE).then((c) => c.put(req, res.clone()));
-        return res;
-      });
-    })
-  );
+  event.respondWith(fetch(req));
 });
