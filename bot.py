@@ -249,7 +249,14 @@ def new_session(email=""):
         "candles_ok":     False,
         "candle_source":  "",   # HUSAAM_EMA10: مصدر الشموع للعرض
         "status_msg":     "",   # رسالة للمشترك
+        "_last_bal_sync_ts": 0.0,
     }
+
+def _is_session_sim_mode(S: dict) -> bool:
+    # المحاكاة تكون فعّالة إذا pyquotex غير متاحة أو لا يوجد client متصل للجلسة.
+    if not QX:
+        return True
+    return not bool(S and S.get("client"))
 
 def get_session(token) -> dict:
     if not token: return None
@@ -2341,7 +2348,7 @@ async def login(req: LoginReq):
     return {"success":True,"needs_pin":False,"email":req.email,
             "user_id":abs(hash(req.email))%90_000_000+10_000_000,
             "real_balance":S["real_balance"],"demo_balance":S["demo_balance"],
-            "currency":S["currency"],"sim_mode":not QX}
+            "currency":S["currency"],"sim_mode":_is_session_sim_mode(S)}
 
 @app.post("/api/pin")
 async def pin_ep(req: PinReq):
@@ -2360,7 +2367,7 @@ async def pin_ep(req: PinReq):
             return {"success":True,"email":S["email"],
                     "user_id":abs(hash(S["email"]))%90_000_000+10_000_000,
                     "real_balance":S["real_balance"],"demo_balance":S["demo_balance"],
-                    "currency":S["currency"],"sim_mode":False}
+                    "currency":S["currency"],"sim_mode":_is_session_sim_mode(S)}
         if not S["needs_pin"] and not S["logged_in"]:
             raise HTTPException(401,"PIN خاطئ")
     raise HTTPException(408,"انتهت المهلة")
@@ -2420,6 +2427,18 @@ async def stop_ep(req: TokenReq):
 async def status(token: str=""):
     S = get_session(token)
     if not S: return {"logged_in":False,"running":False,"needs_pin":False}
+    # تحديث دوري للرصيدين من Quotex (لإظهار الرصيد الحقيقي حتى بدون تشغيل البوت).
+    if QX and S.get("logged_in") and S.get("client"):
+        now = time.time()
+        if now - float(S.get("_last_bal_sync_ts", 0.0) or 0.0) >= 20.0:
+            try:
+                real, demo = await _get_balances(S["client"])
+                if real > 0 or demo > 0:
+                    S["real_balance"] = round(float(real), 2)
+                    S["demo_balance"] = round(float(demo), 2)
+                S["_last_bal_sync_ts"] = now
+            except Exception:
+                pass
     total = S["wins"]+S["losses"]
     return {
         "logged_in":      S["logged_in"],
@@ -2437,7 +2456,7 @@ async def status(token: str=""):
         "start_balance":  S["start_balance"],
         "current_trade":  S["current_trade"],
         "trades":         S["trades"][:50],
-        "sim_mode":       not QX,
+        "sim_mode":       _is_session_sim_mode(S),
         "last_signal":    S["last_signal"],
         "candles_ok":     S.get("candles_ok",False),
         "candle_source":  S.get("candle_source",""),
