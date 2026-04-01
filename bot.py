@@ -261,6 +261,7 @@ def new_session(email=""):
         "candle_source":  "",   # HUSAAM_EMA10: مصدر الشموع للعرض
         "status_msg":     "",   # رسالة للمشترك
         "_last_bal_sync_ts": 0.0,
+        "login_error":    "",   # فشل connect بعد إرسال PIN (للعرض بدل مهلة صامتة)
     }
 
 def _is_session_sim_mode(S: dict) -> bool:
@@ -1701,6 +1702,7 @@ async def _get_single_balance(client, mode) -> float:
 
 async def _login_qx(email, password, S):
     try:
+        S["login_error"] = ""
         client = Quotex(email=email, password=password, lang="en")
         S["client"] = client
         import builtins
@@ -1711,7 +1713,9 @@ async def _login_qx(email, password, S):
         if not check:
             if S["needs_pin"]:
                 return {"ok":False,"pin":True,"msg":"أدخل PIN من بريدك"}
-            return {"ok":False,"pin":False,"msg":str(msg) or "فشل الاتصال"}
+            err = str(msg) or "فشل الاتصال"
+            S["login_error"] = err[:800]
+            return {"ok":False,"pin":False,"msg":err}
         real, demo = await _get_balances(client)
         cur = "USD"
         try:
@@ -1725,10 +1729,13 @@ async def _login_qx(email, password, S):
         S["logged_in"] = True
         S["needs_pin"] = False
         S["email"] = email
+        S["login_error"] = ""
         return {"ok":True,"client":client,"real":real,"demo":demo,"cur":cur}
     except Exception as e:
         log.error(traceback.format_exc())
-        return {"ok":False,"pin":False,"msg":str(e)}
+        err = str(e)
+        S["login_error"] = err[:800]
+        return {"ok":False,"pin":False,"msg":err}
 
 async def _do_trade(client, asset, amount, direction, acc):
     try:
@@ -2330,6 +2337,7 @@ async def login(req: LoginReq):
             except: pass
         S["email"] = req.email
         S["needs_pin"] = False
+        S["login_error"] = ""
         drain_pin_queue(req.email)
         # connect() يستدعي input() ويُعلّق على queue حتى يصل PIN من /api/pin.
         # إذا انتظرنا result(150) هنا، لا تُرسل الاستجابة أبداً → الواجهة لا تظهر حقل PIN.
@@ -2406,7 +2414,7 @@ async def logout(req: TokenReq):
         if S.get("client"):
             try: run_async_for(S.get("email","_"), _close(S["client"]),5)
             except: pass
-        S.update({"logged_in":False,"needs_pin":False,"trades":[],"wins":0,
+        S.update({"logged_in":False,"needs_pin":False,"login_error":"","trades":[],"wins":0,
                   "losses":0,"session_profit":0.0,"current_trade":None,"client":None})
     return {"success":True}
 
@@ -2452,7 +2460,7 @@ async def stop_ep(req: TokenReq):
 @app.get("/api/status")
 async def status(token: str=""):
     S = get_session(token)
-    if not S: return {"logged_in":False,"running":False,"needs_pin":False}
+    if not S: return {"logged_in":False,"running":False,"needs_pin":False,"login_error":""}
     # تحديث دوري للرصيدين من Quotex (لإظهار الرصيد الحقيقي حتى بدون تشغيل البوت).
     if QX and S.get("logged_in") and S.get("client"):
         now = time.time()
@@ -2490,9 +2498,11 @@ async def status(token: str=""):
         "candles_ok":     S.get("candles_ok",False),
         "candle_source":  S.get("candle_source",""),
         "status_msg":     S.get("status_msg",""),
+        "login_error":    (S.get("login_error") or "")[:800],
     }
 
 if __name__ == "__main__":
+    log.info("ℹ️ للجلسات وPIN: شغّل عملية واحدة فقط (worker واحد) حتى لا تُفقد SESSIONS بين الطلبات")
     log.info("🚀 Husaam Trader — http://localhost:8000")
     log.info("👤 Admin: http://localhost:8000/admin")
     log.info(f"🌐 CORS origins: {ALLOWED_ORIGINS}")
