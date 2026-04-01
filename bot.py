@@ -307,7 +307,6 @@ class BotReq(BaseModel):
     account_type: str
     profit_limit: float
     stop_loss: float
-    double_on_loss: bool = False
     token: str
 
 class TokenReq(BaseModel):
@@ -1864,10 +1863,6 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
     log.info(f"🏁 رصيد البداية المعتمد: {start_bal}")
 
 
-    pending_double_count = 0
-    pending_double_asset = ""
-    pending_double_dir = "wait"
-
     while not stop.is_set():
         try:
             # ── جمع الأسعار الحية ──────────────────────────────────────────
@@ -1879,19 +1874,9 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
             # ── تحليل الشمعات ─────────────────────────────────────────────
             direction = "wait"
             chosen_asset = all_assets[0]
-            forced_double = False
-            burst_count = 1
             any_candles = False
 
-            if pending_double_count > 0 and pending_double_asset:
-                forced_double = True
-                direction = pending_double_dir if pending_double_dir in ("call", "put") else S.get("last_signal", "wait")
-                chosen_asset = pending_double_asset
-                burst_count = pending_double_count
-                pending_double_count = 0
-                log.info(f"♻️ مضاعفة: تنفيذ {burst_count} صفقات مباشرة على {chosen_asset} باتجاه {direction.upper()}")
-                S["status_msg"] = "المضاعفة مفعلة: تنفيذ صفقة إضافية بعد خسارة"
-            elif QX and S["logged_in"] and S["client"]:
+            if QX and S["logged_in"] and S["client"]:
                 # جمع أسعار لكل الأزواج
                 for a in all_assets:
                     _collect_price(S["client"], a, S["email"])
@@ -2030,49 +2015,44 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
             S["last_signal"] = direction
 
             # ── توقيت الإرسال
-            # في وضع المضاعفة بعد الخسارة: تنفيذ فوري (بدون انتظار الدقيقة)
-            if not forced_double:
-                wait_for_minute_start(stop)
-                if stop.is_set(): break
-            else:
-                if stop.is_set(): break
+            wait_for_minute_start(stop)
+            if stop.is_set(): break
 
             log.info(f"🎯 {direction.upper()} | {datetime.now().strftime('%H:%M:%S')}")
 
-            # ── تسجيل/تنفيذ الصفقات (Burst) ────────────────────────────────
+            # ── تسجيل/تنفيذ الصفقة ─────────────────────────────────────────
             opened_trades = []
-            for i in range(max(1, int(burst_count))):
-                trade = {
-                    "id":         int(time.time()*1000) + i,
-                    "asset":      chosen_asset,
-                    "direction":  direction,
-                    "amount":     req.amount,
-                    "duration":   60,
-                    "status":     "pending",
-                    "profit":     0,
-                    "started_at": datetime.now().isoformat(),
-                    "account":    req.account_type,
-                    "strategy":   req.strategy,
-                }
-                S["current_trade"] = trade
-                tid = None
-                if QX and S["logged_in"] and S["client"]:
-                    r = run_async_for(S["email"], _do_trade(S["client"],chosen_asset,req.amount,
-                                            direction,req.account_type), 20)
-                    if r["ok"]:
-                        tid = r.get("id")
-                    else:
-                        msg = str(r.get("msg",""))
-                        log.warning(f"⚠️ {msg}")
-                        if "not_money" in msg.lower():
-                            log.warning("💸 رصيد غير كافٍ — توقف")
-                            S["current_trade"] = None
-                            stop.set()
-                            break
-                        continue
+            trade = {
+                "id":         int(time.time() * 1000),
+                "asset":      chosen_asset,
+                "direction":  direction,
+                "amount":     req.amount,
+                "duration":   60,
+                "status":     "pending",
+                "profit":     0,
+                "started_at": datetime.now().isoformat(),
+                "account":    req.account_type,
+                "strategy":   req.strategy,
+            }
+            S["current_trade"] = trade
+            tid = None
+            if QX and S["logged_in"] and S["client"]:
+                r = run_async_for(S["email"], _do_trade(S["client"],chosen_asset,req.amount,
+                                        direction,req.account_type), 20)
+                if r["ok"]:
+                    tid = r.get("id")
                 else:
-                    log.info(f"🔵 محاكاة {chosen_asset} {direction.upper()} ({i+1}/{max(1, int(burst_count))})")
-                opened_trades.append((trade, tid))
+                    msg = str(r.get("msg",""))
+                    log.warning(f"⚠️ {msg}")
+                    if "not_money" in msg.lower():
+                        log.warning("💸 رصيد غير كافٍ — توقف")
+                        S["current_trade"] = None
+                        stop.set()
+                        break
+                    continue
+            else:
+                log.info(f"🔵 محاكاة {chosen_asset} {direction.upper()}")
+            opened_trades.append((trade, tid))
 
             if stop.is_set():
                 break
@@ -2092,9 +2072,8 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
                 stop.wait(timeout=1)
             if stop.is_set(): break
 
-            # ── النتائج لكل صفقة في الـ Burst ─────────────────────────────
+            # ── النتائج ────────────────────────────────────────────────────
             total_prf = 0.0
-            any_loss = False
             for trade, tid in opened_trades:
                 if QX and tid and S["client"]:
                     r2  = run_async_for(S["email"], _check_win(S["client"],tid), 15)
@@ -2106,7 +2085,6 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
 
                 prf = round(prf,2)
                 total_prf += prf
-                any_loss = any_loss or (not win)
                 trade.update({"status":"win" if win else "loss",
                               "profit":prf,"ended_at":datetime.now().isoformat()})
                 S["trades"].insert(0, dict(trade))
@@ -2114,12 +2092,6 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
 
                 if win: S["wins"]+=1;   log.info(f"✅ فوز +{prf}")
                 else:   S["losses"]+=1; log.info(f"❌ خسارة {prf}")
-
-            if (len(opened_trades) == 1) and any_loss and req.double_on_loss:
-                pending_double_count = 2
-                pending_double_asset = chosen_asset
-                pending_double_dir = direction
-                log.info(f"🧮 المضاعفة: بعد الخسارة سيتم تنفيذ صفقتين فوراً على {chosen_asset}")
 
             S["current_trade"] = None
 

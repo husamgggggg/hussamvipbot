@@ -535,13 +535,9 @@ h1{font-size:18px;}
       <div class="tog-label"><div class="tog-title">هدف الربح</div><div class="tog-desc" id="plDesc">يوقف عند +50</div></div>
       <div class="tog" id="tP" onclick="tgP()"></div>
     </div>
-    <div class="togrow" style="margin-bottom:12px">
+    <div class="togrow">
       <div class="tog-label"><div class="tog-title">حد الخسارة</div><div class="tog-desc" id="slDesc">يوقف عند -30</div></div>
       <div class="tog" id="tS" onclick="tgS()"></div>
-    </div>
-    <div class="togrow">
-      <div class="tog-label"><div class="tog-title">المضاعفة</div><div class="tog-desc" id="dbDesc">عند الخسارة: صفقتان فوراً على نفس الزوج</div></div>
-      <div class="tog off" id="tD" onclick="tgD()"></div>
     </div>
   </div>
   <div class="infob">مدة الصفقة: <strong>60 ثانية</strong> &nbsp;|&nbsp; الدخول يتم عند اكتمال الإشارة فقط<br>لا دخول عشوائي &nbsp;|&nbsp; يتم اختيار أفضل زوج تلقائياً</div>
@@ -666,7 +662,7 @@ h1{font-size:18px;}
 <div class="trade-pop" id="tradePop"></div>
 
 <script>
-const s={email:'',uid:'',rBal:0,dBal:0,currency:'USD',token:'',acc:'demo',asset:'EURUSD_otc',assets:[],strategy:'HUSAAM',pOn:true,sOn:true,dOn:false,running:false,wins:0,losses:0,profit:0,pollInt:null,simT:null,sim:false,lastTradePopupId:null,hiddenLiveTradeId:null};
+const s={email:'',uid:'',rBal:0,dBal:0,currency:'USD',token:'',acc:'demo',asset:'EURUSD_otc',assets:[],strategy:'HUSAAM',pOn:true,sOn:true,running:false,wins:0,losses:0,profit:0,pollInt:null,simT:null,sim:false,lastTradePopupId:null,hiddenLiveTradeId:null};
 const ASSETS_OTC=['EURUSD_otc','GBPUSD_otc','AUDUSD_otc','USDJPY_otc','EURJPY_otc','GBPJPY_otc','AUDCAD_otc','USDCAD_otc','EURGBP_otc','EURAUD_otc','GBPAUD_otc','NZDUSD_otc'];
 const ASSETS_LIVE=['EURUSD','GBPUSD','AUDUSD','USDJPY','EURJPY','GBPJPY','AUDCAD','USDCAD','EURGBP','EURAUD','GBPAUD','NZDUSD'];
 const ASSETS=[...ASSETS_OTC,...ASSETS_LIVE];
@@ -800,7 +796,7 @@ async function doStart(){
   const sl=s.sOn?(parseFloat(document.getElementById('iSL').value)||0):0;
   if(amt<=0)return toast('أدخل مبلغ صحيح','er');
   const assetList=s.assets.length>0?s.assets:[s.asset];
-  const body={asset:assetList[0],assets:assetList,amount:amt,strategy:s.strategy,account_type:s.acc,profit_limit:pl,stop_loss:sl,double_on_loss:s.dOn,token:s.token};
+  const body={asset:assetList[0],assets:assetList,amount:amt,strategy:s.strategy,account_type:s.acc,profit_limit:pl,stop_loss:sl,token:s.token};
   if(!s.sim){const d=await api('/bot/start','POST',body);if(d&&!d.success)return toast(d.detail||'فشل','er');}
   s.running=true;document.getElementById('stBtn').textContent='إيقاف البوت';document.getElementById('stBtn').classList.add('stop');
   toast('تم تشغيل البوت بنجاح','ok');if(s.sim)simCycle(amt,pl,sl);
@@ -1047,7 +1043,6 @@ function renderLogs(trades){
 function selAcc(t){s.acc=t;document.getElementById('bReal').classList.toggle('sel',t==='real');document.getElementById('bDemo').classList.toggle('sel',t==='demo');}
 function tgP(){s.pOn=!s.pOn;document.getElementById('tP').classList.toggle('off',!s.pOn);document.getElementById('plDesc').textContent=s.pOn?`يوقف عند +${document.getElementById('iPL').value||50}`:'معطّل';}
 function tgS(){s.sOn=!s.sOn;document.getElementById('tS').classList.toggle('off',!s.sOn);document.getElementById('slDesc').textContent=s.sOn?`يوقف عند -${document.getElementById('iSL').value||30}`:'معطّل';}
-function tgD(){s.dOn=!s.dOn;document.getElementById('tD').classList.toggle('off',!s.dOn);document.getElementById('dbDesc').textContent=s.dOn?'مفعل: عند الخسارة ينفذ صفقتين مباشرة':'معطّل';}
 document.addEventListener('input',e=>{
   if(e.target.id==='iPL'&&s.pOn)document.getElementById('plDesc').textContent=`يوقف عند +${e.target.value}`;
   if(e.target.id==='iSL'&&s.sOn)document.getElementById('slDesc').textContent=`يوقف عند -${e.target.value}`;
