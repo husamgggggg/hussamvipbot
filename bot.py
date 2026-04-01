@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 import pydantic, uvicorn
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel
 
 try:
@@ -2210,6 +2210,13 @@ async def ui(): return HTML
 
 @app.get("/admin", response_class=HTMLResponse)
 async def admin_ui(): return ADMIN
+
+@app.get("/manifest.json")
+async def manifest_json():
+    p = os.path.join(os.path.dirname(__file__), "manifest.json")
+    if not os.path.isfile(p):
+        raise HTTPException(404, "manifest غير موجود")
+    return FileResponse(p, media_type="application/manifest+json")
 
 # ── Admin ─────────────────────────────────────────────────────────────────────
 @app.post("/api/admin/login")
