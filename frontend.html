@@ -753,11 +753,26 @@ async function doLogin(){
 }
 async function doPin(){
   const pin=(document.getElementById('iPin').value||'').replace(/\D/g,'');if(!pin||pin.length<4)return toast('أدخل PIN كامل','er');
-  const btn=document.getElementById('pinBtn');btn.disabled=true;btn.textContent='⏳ جارٍ التحقق...';
+  const btn=document.getElementById('pinBtn');btn.disabled=true;btn.textContent='⏳ جارٍ الإرسال...';
   const d=await api('/pin','POST',{pin:String(pin),token:s.token});
+  if(!d){btn.disabled=false;btn.textContent='تأكيد الرمز';return toast('تعذر الاتصال بالخادم','er');}
+  if(!d.success){btn.disabled=false;btn.textContent='تأكيد الرمز';return toast(d.detail||d.message||'فشل','er');}
+  if(d.pending){
+    btn.textContent='⏳ جارٍ التحقق...';
+    const t0=Date.now(),maxMs=120000;
+    while(Date.now()-t0<maxMs){
+      await new Promise(r=>setTimeout(r,400));
+      const st=await api('/status?token='+encodeURIComponent(s.token));
+      if(st&&st.logged_in){
+        btn.disabled=false;btn.textContent='تأكيد الرمز';
+        afterLogin({success:true,email:st.email,user_id:st.user_id,real_balance:st.real_balance,demo_balance:st.demo_balance,currency:st.currency,sim_mode:st.sim_mode});
+        return;
+      }
+    }
+    btn.disabled=false;btn.textContent='تأكيد الرمز';
+    return toast('انتهت مهلة التحقق — تحقق من الرمز أو أعد تسجيل الدخول','er');
+  }
   btn.disabled=false;btn.textContent='تأكيد الرمز';
-  if(!d)return toast('تعذر الاتصال بالخادم','er');
-  if(!d.success)return toast(d.detail||d.message||'PIN خاطئ','er');
   afterLogin(d);
 }
 function backLogin(){document.getElementById('pinBox').style.display='none';document.getElementById('loginBox').style.display='block';}

@@ -2394,16 +2394,9 @@ async def pin_ep(req: PinReq):
         return {"success":True,"email":S["email"],"user_id":12345678,
                 "real_balance":0.0,"demo_balance":10_000.0,"currency":"USD","sim_mode":True}
     get_pin_q(S["email"]).put(p)
-    # لا نستخدم needs_pin للحكم على «خطأ»: يُصفَّر فور سحب الرمز من الطابور قبل انتهاء connect().
-    deadline = time.monotonic() + 120
-    while time.monotonic() < deadline:
-        if S.get("logged_in") and S.get("client"):
-            return {"success":True,"email":S["email"],
-                    "user_id":abs(hash(S["email"]))%90_000_000+10_000_000,
-                    "real_balance":S["real_balance"],"demo_balance":S["demo_balance"],
-                    "currency":S["currency"],"sim_mode":_is_session_sim_mode(S)}
-        await asyncio.sleep(0.25)
-    raise HTTPException(408,"انتهت مهلة التحقق — تحقق من الرمز أو أعد تسجيل الدخول")
+    # إرجاع فوري حتى لا يقطع Nginx الطلب (504) بسبب proxy_read_timeout الافتراضي (~60s).
+    # الواجهة تستطلع /api/status حتى يصبح logged_in=true بعد انتهاء connect() في الخلفية.
+    return {"success": True, "pending": True}
 
 @app.post("/api/logout")
 async def logout(req: TokenReq):
@@ -2473,10 +2466,13 @@ async def status(token: str=""):
             except Exception:
                 pass
     total = S["wins"]+S["losses"]
+    _em = S.get("email") or ""
+    _uid = abs(hash(_em)) % 90_000_000 + 10_000_000 if _em else 0
     return {
         "logged_in":      S["logged_in"],
         "needs_pin":      S["needs_pin"],
         "email":          S["email"],
+        "user_id":        _uid,
         "real_balance":   S["real_balance"],
         "demo_balance":   S["demo_balance"],
         "currency":       S["currency"],
