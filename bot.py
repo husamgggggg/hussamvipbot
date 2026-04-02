@@ -8,7 +8,7 @@ Abood Trader Bot — النسخة النهائية الكاملة
 ✅ متعدد المشتركين كل بحسابه المستقل
 ✅ إشعار عند تحقق الهدف
 """
-import asyncio, json, logging, os, queue, random, re
+import asyncio, json, logging, os, queue, random, re, sys
 import secrets, threading, time, traceback
 from datetime import datetime, timezone
 
@@ -148,6 +148,57 @@ logging.basicConfig(
 for _h in logging.root.handlers:
     _h.addFilter(_CloudflareWs403Filter())
 log = logging.getLogger("AboodTrader")
+
+
+def _acquire_single_instance_lock():
+    """
+    يمنع تشغيل أكثر من `python bot.py` على نفس الجهاز.
+    إن ظهرت PIDs مختلفة كل ثوانٍ في اللوج فالسبب غالباً systemd/حلقة shell أو عدة خدمات — هذا يقلّل التصادم على المنفذ والجلسات.
+    """
+    try:
+        import fcntl
+    except ImportError:
+        log.warning("قفل النسخة الواحدة غير متاح — على Windows تجنّب تشغيل نسختين يدوياً")
+        return None
+    import atexit
+
+    lock_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "bot_instance.lock")
+    f = open(lock_path, "a+", encoding="utf-8")
+    try:
+        fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        try:
+            f.seek(0)
+            prev = (f.read() or "").strip()
+        except Exception:
+            prev = ""
+        f.close()
+        port = int(os.getenv("PORT", "8000"))
+        log.error(
+            "رفض التشغيل: يوجد بوت يعمل مسبقاً (آخر PID في %s: %s). "
+            "تحقق من: pgrep -af bot.py | systemctl | while true; do python… — ثم أوقف المكرر أو fuser -k %s/tcp",
+            lock_path,
+            prev or "?",
+            port,
+        )
+        sys.exit(1)
+    f.seek(0)
+    f.truncate()
+    f.write(str(os.getpid()))
+    f.flush()
+
+    def _release():
+        try:
+            fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+        except Exception:
+            pass
+        try:
+            f.close()
+        except Exception:
+            pass
+
+    atexit.register(_release)
+    return f
 
 
 def _parse_quotex_proxy_env():
@@ -478,6 +529,10 @@ def get_session_loop(email: str):
             threading.Thread(target=loop.run_forever, daemon=True, name=f"loop-{email}").start()
             _session_loops[email] = loop
         return _session_loops[email]
+
+# إغلاق عميل Quotex قد يتجاوز 5ث إذا علق WebSocket (تسجيل خروج / إعادة دخول / حذف من الأدمن)
+_CLOSE_CLIENT_TIMEOUT_SEC = 20
+
 
 def run_async_for(email: str, coro, timeout=30):
     loop = get_session_loop(email)
@@ -2438,7 +2493,7 @@ async def admin_delete(req: ApproveReq):
         S["stop_event"].set()
         S["running"] = False
         if S.get("client"):
-            try: run_async_for(req.email, _close(S["client"]), 5)
+            try: run_async_for(req.email, _close(S["client"]), _CLOSE_CLIENT_TIMEOUT_SEC)
             except: pass
     # حذف من SESSIONS
     token = USERS[req.email].get("session_token","")
@@ -2497,7 +2552,7 @@ async def login(req: LoginReq):
         S = SESSIONS[req.token]
     if QX:
         if S.get("client"):
-            try: run_async_for(req.email, _close(S["client"]),5)
+            try: run_async_for(req.email, _close(S["client"]), _CLOSE_CLIENT_TIMEOUT_SEC)
             except: pass
         S["email"] = req.email
         S["needs_pin"] = False
@@ -2576,7 +2631,7 @@ async def logout(req: TokenReq):
     if S:
         if S.get("running"): S["stop_event"].set(); S["running"]=False
         if S.get("client"):
-            try: run_async_for(S.get("email","_"), _close(S["client"]),5)
+            try: run_async_for(S.get("email","_"), _close(S["client"]), _CLOSE_CLIENT_TIMEOUT_SEC)
             except: pass
         S.update({"logged_in":False,"needs_pin":False,"login_error":"","trades":[],"wins":0,
                   "losses":0,"session_profit":0.0,"current_trade":None,"client":None})
@@ -2666,6 +2721,7 @@ async def status(token: str=""):
     }
 
 if __name__ == "__main__":
+    _acquire_single_instance_lock()
     log.info("PID=%s — إذا تكرّر هذا السطر كل ثوانٍ فهناك عدة عمليات أو إعادة تشغيل تلقائية", os.getpid())
     log.info("ℹ️ للجلسات وPIN: شغّل عملية واحدة فقط (worker واحد) حتى لا تُفقد SESSIONS بين الطلبات")
     log.info("🚀 Abood Trader — http://localhost:8000")
