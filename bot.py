@@ -171,10 +171,12 @@ def _install_pyquotex_proxy_websocket(ws_proxy: dict | None):
     from pyquotex import global_value as qx_gv
 
     async def _start_with_proxy(self):
+        if not hasattr(qx_gv, "SSID"):
+            setattr(qx_gv, "SSID", None)
         qx_gv.check_websocket_if_connect = None
         qx_gv.check_websocket_if_error = False
         qx_gv.websocket_error_reason = None
-        if not qx_gv.SSID:
+        if not getattr(qx_gv, "SSID", None):
             await self.authenticate()
         from pyquotex.ws.client import WebsocketClient
 
@@ -216,7 +218,7 @@ def _install_pyquotex_proxy_websocket(ws_proxy: dict | None):
                 qapi.logger.debug("Websocket connected successfully!!!")
                 return True, "Websocket connected successfully!!!"
             if qx_gv.check_rejected_connection == 1:
-                qx_gv.SSID = None
+                setattr(qx_gv, "SSID", None)
                 qapi.logger.debug("Websocket Token Rejected.")
                 return True, "Websocket Token Rejected."
             time.sleep(0.05)
