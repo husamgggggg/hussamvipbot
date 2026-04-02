@@ -277,6 +277,35 @@ def _install_pyquotex_proxy_websocket(ws_proxy: dict | None):
         from pyquotex.ws.client import WebsocketClient
 
         self.websocket_client = WebsocketClient(self)
+        # الهيدرز والكوكيز تُقرأ من WebSocketApp عند connect() — run_forever لا يقبل kwargs اسمه header.
+        wapp = self.websocket_client.wss
+        _sd = getattr(self, "session_data", None) or {}
+        if not isinstance(_sd, dict):
+            _sd = {}
+        _base = (getattr(self, "https_url", None) or "").rstrip("/")
+        _ck = (_sd.get("cookies") or "").strip()
+        if not _ck and hasattr(self, "browser") and getattr(self.browser, "cookies", None):
+            try:
+                _ck = "; ".join(f"{c.name}={c.value}" for c in self.browser.cookies)
+            except Exception:
+                pass
+        wapp.cookie = _ck or None
+        _ua = _sd.get("user_agent")
+        if isinstance(getattr(wapp, "header", None), dict):
+            if _ua:
+                wapp.header["User-Agent"] = _ua
+            if _base:
+                wapp.header["Origin"] = _base
+                wapp.header.setdefault("Referer", f"{_base}/")
+            wapp.header["Host"] = f"ws2.{self.host}"
+        log.info(
+            "WS عبر بروكسي: %s:%s | http_proxy_auth=%s | cookie≈%s حرف | User-Agent=%s",
+            ws_proxy["host"],
+            int(ws_proxy["port"]),
+            bool(ws_proxy.get("auth")),
+            len(_ck or ""),
+            "نعم" if _ua else "لا",
+        )
         payload = {
             "suppress_origin": True,
             "ping_interval": 24,
@@ -292,13 +321,22 @@ def _install_pyquotex_proxy_websocket(ws_proxy: dict | None):
             },
             "reconnect": 5,
             "http_proxy_host": ws_proxy["host"],
-            "http_proxy_port": ws_proxy["port"],
+            "http_proxy_port": int(ws_proxy["port"]),
         }
         if ws_proxy.get("auth"):
             payload["http_proxy_auth"] = ws_proxy["auth"]
         payload["proxy_type"] = ws_proxy.get("proxy_type") or "http"
         if qapi.platform.system() == "Linux":
             payload["sslopt"]["ssl_version"] = qapi.ssl.PROTOCOL_TLS
+        qapi.logger.warning(
+            "WS قبل run_forever: proxy=%s:%s ws_auth=%s payload_http_proxy_auth=%s cookie_len=%s wapp_header_dict=%s",
+            payload.get("http_proxy_host"),
+            payload.get("http_proxy_port"),
+            bool(ws_proxy.get("auth")),
+            bool(payload.get("http_proxy_auth")),
+            len(_ck or ""),
+            isinstance(getattr(wapp, "header", None), dict),
+        )
         self.websocket_thread = qapi.threading.Thread(
             target=self.websocket.run_forever, kwargs=payload
         )
