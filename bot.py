@@ -9,6 +9,7 @@ Abood Trader Bot — النسخة النهائية الكاملة
 ✅ إشعار عند تحقق الهدف
 """
 import asyncio, json, logging, os, queue, random, re, sys
+from contextlib import asynccontextmanager
 import secrets, threading, time, traceback
 from datetime import datetime, timezone
 
@@ -2385,14 +2386,15 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
 # ══════════════════════════════════════════════════════════════════════════════
 # FastAPI
 # ══════════════════════════════════════════════════════════════════════════════
-app = FastAPI(title="Abood Trader")
+@asynccontextmanager
+async def _app_lifespan(app: FastAPI):
+    _configure_quiet_loggers()
+    yield
+
+
+app = FastAPI(title="Abood Trader", lifespan=_app_lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=ALLOWED_ORIGINS,
                    allow_methods=["*"], allow_headers=["*"])
-
-
-@app.on_event("startup")
-async def _startup_quiet_logs():
-    _configure_quiet_loggers()
 
 _DIR = os.path.dirname(__file__)
 _fe = os.path.join(_DIR, "frontend.html")
