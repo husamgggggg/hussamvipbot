@@ -128,6 +128,111 @@ logging.basicConfig(
 log = logging.getLogger("AboodTrader")
 
 
+def _parse_quotex_proxy_env():
+    """
+    QUOTEX_PROXY_URL مثال (IPRoyal HTTP):
+    http://USER:PASS@geo.iproyal.com:12321
+    إن وُجدت أحرف خاصة في كلمة المرور استخدم ترميز URL (%40 بدل @).
+    """
+    from urllib.parse import urlparse, unquote
+
+    raw = (os.getenv("QUOTEX_PROXY_URL") or "").strip()
+    if not raw:
+        return None, None
+    if "://" not in raw:
+        raw = "http://" + raw
+    u = urlparse(raw)
+    if not u.hostname:
+        return None, None
+    scheme = (u.scheme or "http").lower()
+    if scheme in ("socks5", "socks5h"):
+        default_port = 1080
+        ptype = "socks5h"
+    elif scheme in ("socks4", "socks4a"):
+        default_port = 1080
+        ptype = scheme
+    else:
+        default_port = 80
+        ptype = "http"
+    port = int(u.port or default_port)
+    user = unquote(u.username or "")
+    pw = unquote(u.password or "")
+    auth = (user, pw) if (user or pw) else None
+    proxies = {"http": raw, "https": raw}
+    ws = {"host": u.hostname, "port": port, "auth": auth, "proxy_type": ptype}
+    return proxies, ws
+
+
+def _install_pyquotex_proxy_websocket(ws_proxy: dict | None):
+    """pyquotex يمرّر proxies لـ HTTP فقط؛ WebSocket يحتاج http_proxy_* في run_forever."""
+    if not QX or not ws_proxy:
+        return
+    import pyquotex.api as qapi
+
+    async def _start_with_proxy(self):
+        qapi.global_value.check_websocket_if_connect = None
+        qapi.global_value.check_websocket_if_error = False
+        qapi.global_value.websocket_error_reason = None
+        if not qapi.global_value.SSID:
+            await self.authenticate()
+        from pyquotex.ws.client import WebsocketClient
+
+        self.websocket_client = WebsocketClient(self)
+        payload = {
+            "suppress_origin": True,
+            "ping_interval": 24,
+            "ping_timeout": 20,
+            "ping_payload": "2",
+            "origin": self.https_url,
+            "host": f"ws2.{self.host}",
+            "sslopt": {
+                "check_hostname": False,
+                "cert_reqs": qapi.ssl.CERT_NONE,
+                "ca_certs": qapi.cacert,
+                "context": qapi.ssl_context,
+            },
+            "reconnect": 5,
+            "http_proxy_host": ws_proxy["host"],
+            "http_proxy_port": ws_proxy["port"],
+        }
+        if ws_proxy.get("auth"):
+            payload["http_proxy_auth"] = ws_proxy["auth"]
+        payload["proxy_type"] = ws_proxy.get("proxy_type") or "http"
+        if qapi.platform.system() == "Linux":
+            payload["sslopt"]["ssl_version"] = qapi.ssl.PROTOCOL_TLS
+        self.websocket_thread = qapi.threading.Thread(
+            target=self.websocket.run_forever, kwargs=payload
+        )
+        self.websocket_thread.daemon = True
+        self.websocket_thread.start()
+        while True:
+            if qapi.global_value.check_websocket_if_error:
+                return False, qapi.global_value.websocket_error_reason
+            if qapi.global_value.check_websocket_if_connect == 0:
+                qapi.logger.debug("Websocket connection closed.")
+                return False, "Websocket connection closed."
+            if qapi.global_value.check_websocket_if_connect == 1:
+                qapi.logger.debug("Websocket connected successfully!!!")
+                return True, "Websocket connected successfully!!!"
+            if qapi.global_value.check_rejected_connection == 1:
+                qapi.global_value.SSID = None
+                qapi.logger.debug("Websocket Token Rejected.")
+                return True, "Websocket Token Rejected."
+            time.sleep(0.05)
+
+    qapi.QuotexAPI.start_websocket = _start_with_proxy
+
+
+_QX_PROXY_DICT, _QX_PROXY_WS = _parse_quotex_proxy_env()
+_install_pyquotex_proxy_websocket(_QX_PROXY_WS)
+if _QX_PROXY_DICT:
+    log.info(
+        "🌐 QUOTEX_PROXY_URL مفعّل (HTTP + WebSocket عبر البروكسي: %s:%s)",
+        _QX_PROXY_WS["host"],
+        _QX_PROXY_WS["port"],
+    )
+
+
 def _configure_quiet_loggers():
     """يخفي سجل وصول Uvicorn وضجيج websocket (Sending ping) عند أي طريقة تشغيل."""
     logging.getLogger("uvicorn.access").disabled = True
@@ -1702,7 +1807,12 @@ async def _get_single_balance(client, mode) -> float:
 async def _login_qx(email, password, S):
     try:
         S["login_error"] = ""
-        client = Quotex(email=email, password=password, lang="en")
+        client = Quotex(
+            email=email,
+            password=password,
+            lang="en",
+            proxies=_QX_PROXY_DICT,
+        )
         S["client"] = client
         import builtins
         orig = builtins.input
