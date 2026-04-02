@@ -843,6 +843,18 @@ async function doPin(){
   afterLogin(d);
 }
 function backLogin(){document.getElementById('pinBox').style.display='none';document.getElementById('loginBox').style.display='block';}
+async function pullBalancesSoon(){
+  if(s.sim||!s.token)return;
+  for(let i=0;i<5;i++){
+    const d=await api('/status?token='+encodeURIComponent(s.token));
+    if(d&&d._httpOk){
+      s.rBal=d.real_balance;s.dBal=d.demo_balance;if(d.currency)s.currency=d.currency;
+      updBals();
+      if((d.real_balance>0||d.demo_balance>0))break;
+    }
+    await new Promise(r=>setTimeout(r,1200));
+  }
+}
 function afterLogin(d){
   s.sim=!!d.sim_mode;
   renderBadge();
@@ -850,7 +862,7 @@ function afterLogin(d){
   if(s.token&&s.email)localStorage.setItem('at_token_'+s.email,s.token);
   document.getElementById('hId').textContent=s.uid;document.getElementById('hEm').textContent=s.email;document.getElementById('dEm').textContent=s.email;
   document.getElementById('pinBox').style.display='none';document.getElementById('loginBox').style.display='block';
-  updBals();toast('✅ مرحباً بك في فريق عبود تريدر','ok');go('sBot',2);if(!s.sim)startPoll();
+  updBals();toast('✅ مرحباً بك في فريق عبود تريدر','ok');go('sBot',2);if(!s.sim){startPoll();pullBalancesSoon();}
 }
 async function doLogout(){
   doStop();clearInterval(s.pollInt);if(s.token)await api('/logout','POST',{token:s.token});
@@ -1201,7 +1213,7 @@ if(_em){
         document.getElementById('dEm').textContent=s.email;
         updBals();updStats();
         if(s.running){document.getElementById('stBtn').textContent='إيقاف البوت';document.getElementById('stBtn').classList.add('stop');}
-        go('sBot',2);if(!s.sim)startPoll();
+        go('sBot',2);if(!s.sim){startPoll();pullBalancesSoon();}
         toast('✅ تم استعادة جلستك','ok');
       }else{go('sLogin',-1);}
     })();

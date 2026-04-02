@@ -1972,6 +1972,20 @@ def _extract_balance(p):
     except: pass
     return real, demo
 
+
+def _balances_from_ws_account_cache(client):
+    """Quotex يملأ `api.account_balance` من رسائل WebSocket (liveBalance/demoBalance)."""
+    api = getattr(client, "api", None)
+    ab = getattr(api, "account_balance", None) if api else None
+    if not isinstance(ab, dict):
+        return None
+    try:
+        r = float(ab.get("liveBalance") or ab.get("live_balance") or 0)
+        d = float(ab.get("demoBalance") or ab.get("demo_balance") or 0)
+    except (TypeError, ValueError):
+        return None
+    return r, d
+
 def _extract_currency(p):
     try:
         if isinstance(p, dict): return p.get("currency", p.get("currency_char","USD"))
@@ -1981,28 +1995,69 @@ def _extract_currency(p):
     except: pass
     return "USD"
 
+async def _get_balance_wait(client, timeout_sec: float = 14.0):
+    """get_balance في pyquotex ينتظر account_balance إلى ما لا نهاية — نحدّه بمهلة."""
+    try:
+        return await asyncio.wait_for(client.get_balance(), timeout=timeout_sec)
+    except asyncio.TimeoutError:
+        log.warning("get_balance: انتهت المهلة %.1fs", timeout_sec)
+        return None
+    except Exception as e:
+        log.warning("get_balance: %s", e)
+        return None
+
+
 async def _get_balances(client):
     real = demo = 0.0
+    # 1) كاش الـ WS (يصل غالباً مباشرة بعد اتصال السوكيت)
+    got = _balances_from_ws_account_cache(client)
+    if got is not None:
+        real, demo = got
+        if real > 0 or demo > 0:
+            log.info("📋 أرصدة من WebSocket cache: real=%s demo=%s", real, demo)
+            return real, demo
+
+    # 2) إن لم تُرسَل بعد — انتظر قصيراً ثم أعد القراءة
+    for i in range(24):
+        await asyncio.sleep(0.25)
+        got = _balances_from_ws_account_cache(client)
+        if got is not None:
+            real, demo = got
+            if real > 0 or demo > 0:
+                log.info("📋 أرصدة من WS بعد انتظار %.1fs: real=%s demo=%s", (i + 1) * 0.25, real, demo)
+                return real, demo
+
+    # 3) HTTP profile / إعدادات
     try:
         p = await client.get_profile()
-        log.info(f"📋 profile type={type(p).__name__}")
+        log.info("📋 profile type=%s", type(p).__name__)
         real, demo = _extract_balance(p)
-        if real > 0 or demo > 0: return real, demo
+        if real > 0 or demo > 0:
+            return real, demo
     except Exception as e:
-        log.warning(f"get_profile: {e}")
+        log.warning("get_profile: %s", e)
+
+    # 4) تبديل حساب + get_balance بمهلة (بدون تعليق لا نهائي)
     try:
         await client.change_account("REAL")
-        await asyncio.sleep(3)
-        real = float(await client.get_balance() or 0)
-        await asyncio.sleep(2)
+        await asyncio.sleep(1.5)
+        rb = await _get_balance_wait(client, 14.0)
+        real = float(rb or 0)
         await client.change_account("PRACTICE")
-        await asyncio.sleep(3)
-        demo = float(await client.get_balance() or 0)
-        if real == demo and real > 0: real = 0.0
+        await asyncio.sleep(1.5)
+        db = await _get_balance_wait(client, 14.0)
+        demo = float(db or 0)
+        if real == demo and real > 0:
+            real = 0.0
+        log.info("📋 أرصدة من change_account/get_balance: real=%s demo=%s", real, demo)
         return real, demo
     except Exception as e:
-        log.error(f"_get_balances: {e}")
-        return 0.0, 0.0
+        log.error("_get_balances: %s", e)
+    # 5) آخر محاولة: أي قيمة في كاش الـ WS حتى لو صفر
+    got = _balances_from_ws_account_cache(client)
+    if got is not None:
+        return got[0], got[1]
+    return 0.0, 0.0
 
 async def _get_single_balance(client, mode) -> float:
     try:
@@ -2839,12 +2894,15 @@ async def status(token: str=""):
     # تحديث دوري للرصيدين من Quotex (لإظهار الرصيد الحقيقي حتى بدون تشغيل البوت).
     if QX and S.get("logged_in") and S.get("client"):
         now = time.time()
-        if now - float(S.get("_last_bal_sync_ts", 0.0) or 0.0) >= 20.0:
+        _rb = float(S.get("real_balance", 0) or 0)
+        _db = float(S.get("demo_balance", 0) or 0)
+        _bal_iv = 5.0 if (_rb <= 0 and _db <= 0) else 20.0
+        if now - float(S.get("_last_bal_sync_ts", 0.0) or 0.0) >= _bal_iv:
             try:
                 real, demo = await _get_balances(S["client"])
-                if real > 0 or demo > 0:
-                    S["real_balance"] = round(float(real), 2)
-                    S["demo_balance"] = round(float(demo), 2)
+                # لا تشترط real>0 — وإلا يبقى العرض 0.00 حتى لو اكتشفنا لاحقاً أن الرصيد صفر حقيقياً
+                S["real_balance"] = round(float(real), 2)
+                S["demo_balance"] = round(float(demo), 2)
                 S["_last_bal_sync_ts"] = now
             except Exception:
                 pass
