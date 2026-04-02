@@ -117,6 +117,26 @@ _install_pyquotex_ws_candle_asset_fix()
 os.makedirs("logs", exist_ok=True)
 os.makedirs("data", exist_ok=True)
 
+class _CloudflareWs403Filter(logging.Filter):
+    """يختصر سجلات websocket-client عندما يعيد Cloudflare صفحة التحدي بدل ترقية WS."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            msg = record.getMessage()
+        except Exception:
+            return True
+        if "Handshake status 403" not in msg:
+            return True
+        if len(msg) > 500 or "Just a moment" in msg or "cf-mitigated" in msg:
+            record.msg = (
+                "WebSocket handshake 403 — Cloudflare challenge على ws2.qxbroker.com "
+                "(عميل WS لا ينفّذ JavaScript). HTTP قد ينجح والـ WS يُرفض. "
+                "جرّب بروكسي سكني/خروج آخر، IP منزلي، أو تحديث pyquotex."
+            )
+            record.args = ()
+        return True
+
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
@@ -125,6 +145,8 @@ logging.basicConfig(
         logging.FileHandler("logs/bot.log", encoding="utf-8"),
     ],
 )
+for _h in logging.root.handlers:
+    _h.addFilter(_CloudflareWs403Filter())
 log = logging.getLogger("AboodTrader")
 
 
@@ -1835,6 +1857,13 @@ async def _login_qx(email, password, S):
             if S["needs_pin"]:
                 return {"ok":False,"pin":True,"msg":"أدخل PIN من بريدك"}
             err = str(msg) or "فشل الاتصال"
+            if (
+                "403" in err
+                and ("Just a moment" in err or "cf-mitigated" in err or len(err) > 2000)
+            ):
+                err = (
+                    "رفض WebSocket من Cloudflare (تحدي المتصفح). جرّب بروكسي سكني آخر أو تشغيل من شبكة منزلية."
+                )
             S["login_error"] = err[:800]
             return {"ok":False,"pin":False,"msg":err}
         real, demo = await _get_balances(client)
@@ -2637,6 +2666,7 @@ async def status(token: str=""):
     }
 
 if __name__ == "__main__":
+    log.info("PID=%s — إذا تكرّر هذا السطر كل ثوانٍ فهناك عدة عمليات أو إعادة تشغيل تلقائية", os.getpid())
     log.info("ℹ️ للجلسات وPIN: شغّل عملية واحدة فقط (worker واحد) حتى لا تُفقد SESSIONS بين الطلبات")
     log.info("🚀 Abood Trader — http://localhost:8000")
     log.info("👤 Admin: http://localhost:8000/admin")
