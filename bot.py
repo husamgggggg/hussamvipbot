@@ -179,14 +179,13 @@ def _acquire_single_instance_lock():
             prev = ""
         f.close()
         port = int(os.getenv("PORT", "8000"))
-        log.error(
-            "رفض التشغيل: نسخة أخرى تعمل (PID في %s: %s). "
-            "إذا curl http://127.0.0.1:%s/ يعطي 200 فلا حاجة لإعادة التشغيل. "
-            "للإيقاف ثم تشغيل واحد: pkill -9 -f bot.py; sleep 2; fuser -k %s/tcp; sleep 1",
-            lock_path,
-            prev or "?",
-            port,
-            port,
+        # لا نستخدم log.error هنا — خدمة/cron تعيد تشغيل bot.py كل ثوانٍ فتملأ logs/bot.log
+        print(
+            f"رفض التشغيل (stderr): نسخة أخرى تعمل — PID في {lock_path}: {prev or '?'}. "
+            f"إذا curl http://127.0.0.1:{port}/ يعطي 200 فلا تعِد التشغيل. "
+            "أوقف المكرر: systemctl/cron/watchdog أو pkill -9 -f bot.py",
+            file=sys.stderr,
+            flush=True,
         )
         sys.exit(1)
     f.seek(0)
@@ -234,7 +233,15 @@ def _parse_quotex_proxy_env():
     else:
         default_port = 80
         ptype = "http"
-    port = int(u.port or default_port)
+    try:
+        raw_port = u.port
+    except ValueError:
+        log.error(
+            "QUOTEX_PROXY_URL غير صالح: المنفذ ليس رقماً (لا تستخدم ... في الرابط). "
+            "مثال: http://USER:PASS@geo.iproyal.com:12321"
+        )
+        raise SystemExit(1) from None
+    port = int(raw_port) if raw_port is not None else default_port
     user = unquote(u.username or "")
     pw = unquote(u.password or "")
     auth = (user, pw) if (user or pw) else None
@@ -317,12 +324,15 @@ def _install_pyquotex_proxy_websocket(ws_proxy: dict | None):
 
 _QX_PROXY_DICT, _QX_PROXY_WS = _parse_quotex_proxy_env()
 _install_pyquotex_proxy_websocket(_QX_PROXY_WS)
-if _QX_PROXY_DICT:
-    log.info(
-        "🌐 QUOTEX_PROXY_URL مفعّل (HTTP + WebSocket عبر البروكسي: %s:%s)",
-        _QX_PROXY_WS["host"],
-        _QX_PROXY_WS["port"],
-    )
+
+
+def _log_quotex_proxy_if_enabled():
+    if _QX_PROXY_DICT and _QX_PROXY_WS:
+        log.info(
+            "🌐 QUOTEX_PROXY_URL مفعّل (HTTP + WebSocket عبر البروكسي: %s:%s)",
+            _QX_PROXY_WS["host"],
+            _QX_PROXY_WS["port"],
+        )
 
 
 def _configure_quiet_loggers():
@@ -2729,6 +2739,7 @@ async def status(token: str=""):
 
 if __name__ == "__main__":
     _acquire_single_instance_lock()
+    _log_quotex_proxy_if_enabled()
     log.info("PID=%s — إذا تكرّر هذا السطر كل ثوانٍ فهناك عدة عمليات أو إعادة تشغيل تلقائية", os.getpid())
     log.info("ℹ️ للجلسات وPIN: شغّل عملية واحدة فقط (worker واحد) حتى لا تُفقد SESSIONS بين الطلبات")
     log.info("🚀 Abood Trader — http://localhost:8000")
