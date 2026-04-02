@@ -115,6 +115,54 @@ def _install_pyquotex_ws_candle_asset_fix():
 
 _install_pyquotex_ws_candle_asset_fix()
 
+
+def _install_pyquotex_ws_reconnect_resilience():
+    """يمنع اعتبار انقطاع الشبكة/MNAT خطأ فادحاً؛ يمسح العلم بعد كل (إعادة) اتصال ناجح."""
+    if not QX:
+        return
+    try:
+        from pyquotex.ws.client import WebsocketClient
+        from pyquotex import global_value as gv
+    except ImportError:
+        return
+    if getattr(WebsocketClient, "_husaam_ws_reconnect_patch", False):
+        return
+    _orig_on_open = WebsocketClient.on_open
+    _orig_on_error = WebsocketClient.on_error
+
+    def on_open(self, wss):
+        gv.check_websocket_if_error = False
+        gv.websocket_error_reason = None
+        return _orig_on_open(self, wss)
+
+    def on_error(self, wss, error):
+        err_s = str(error)
+        transient = (
+            "Connection to remote host was lost",
+            "WebSocketConnectionClosedException",
+            "ping/pong timed out",
+            "Connection timed out",
+            "timed out",
+            "Connection reset",
+            "Broken pipe",
+            "Temporarily unavailable",
+            "[Errno 104]",
+            "[Errno 54]",
+            "EOF occurred",
+            "SSLEOFError",
+        )
+        if any(x in err_s for x in transient):
+            log.warning("WS انقطاع مؤقت (websocket-client سيعيد المحاولة إن reconnect>0): %s", err_s[:240])
+            return
+        return _orig_on_error(self, wss, error)
+
+    WebsocketClient.on_open = on_open
+    WebsocketClient.on_error = on_error
+    WebsocketClient._husaam_ws_reconnect_patch = True
+
+
+_install_pyquotex_ws_reconnect_resilience()
+
 os.makedirs("logs", exist_ok=True)
 os.makedirs("data", exist_ok=True)
 
@@ -306,10 +354,11 @@ def _install_pyquotex_proxy_websocket(ws_proxy: dict | None):
             len(_ck or ""),
             "نعم" if _ua else "لا",
         )
+        # ping أقصر يحافظ على NAT عبر البروكسي؛ timeout أطول يقلل قطع وهمي؛ reconnect فترة انتظار بين المحاولات
         payload = {
             "suppress_origin": True,
-            "ping_interval": 24,
-            "ping_timeout": 20,
+            "ping_interval": 18,
+            "ping_timeout": 45,
             "ping_payload": "2",
             "origin": self.https_url,
             "host": f"ws2.{self.host}",
@@ -319,7 +368,7 @@ def _install_pyquotex_proxy_websocket(ws_proxy: dict | None):
                 "ca_certs": qapi.cacert,
                 "context": qapi.ssl_context,
             },
-            "reconnect": 5,
+            "reconnect": 8,
             "http_proxy_host": ws_proxy["host"],
             "http_proxy_port": int(ws_proxy["port"]),
         }
@@ -342,16 +391,25 @@ def _install_pyquotex_proxy_websocket(ws_proxy: dict | None):
         )
         self.websocket_thread.daemon = True
         self.websocket_thread.start()
+        # cwi==0 يحدث عند كل إغلاق مؤقت؛ run_forever(reconnect=N) يعيد الاتصال — لا تُفشل connect() فوراً
+        _ws_closed_since = None
+        _ws_grace_sec = 55.0
         while True:
             if getattr(qx_gv, "check_websocket_if_error", False):
                 return False, getattr(qx_gv, "websocket_error_reason", None)
             cwi = getattr(qx_gv, "check_websocket_if_connect", None)
-            if cwi == 0:
-                qapi.logger.debug("Websocket connection closed.")
-                return False, "Websocket connection closed."
             if cwi == 1:
                 qapi.logger.debug("Websocket connected successfully!!!")
                 return True, "Websocket connected successfully!!!"
+            if cwi == 0:
+                if _ws_closed_since is None:
+                    _ws_closed_since = time.monotonic()
+                    qapi.logger.debug("Websocket closed — نافذة إعادة اتصال %.0fs", _ws_grace_sec)
+                elif time.monotonic() - _ws_closed_since > _ws_grace_sec:
+                    qapi.logger.debug("Websocket connection closed.")
+                    return False, "Websocket connection closed."
+            else:
+                _ws_closed_since = None
             if getattr(qx_gv, "check_rejected_connection", False) == 1:
                 setattr(qx_gv, "SSID", None)
                 qapi.logger.debug("Websocket Token Rejected.")
@@ -508,13 +566,17 @@ def new_session(email=""):
         "status_msg":     "",   # رسالة للمشترك
         "_last_bal_sync_ts": 0.0,
         "login_error":    "",   # فشل connect بعد إرسال PIN (للعرض بدل مهلة صامتة)
+        "login_pending":  False,  # مهمة Quotex تعمل في الخلفية (تفادياً لـ 504 من Cloudflare/Nginx)
+        "_login_gen":     0,
     }
 
 def _is_session_sim_mode(S: dict) -> bool:
-    # المحاكاة تكون فعّالة إذا pyquotex غير متاحة أو لا يوجد client متصل للجلسة.
+    # المحاكاة: بدون Quotex، أو قبل اكتمال الدخول (حتى لا يُعرض «جاهز» أثناء connect).
     if not QX:
         return True
-    return not bool(S and S.get("client"))
+    if not S or not S.get("logged_in"):
+        return True
+    return not bool(S.get("client"))
 
 def get_session(token) -> dict:
     if not token: return None
@@ -1983,7 +2045,7 @@ async def _login_qx(email, password, S):
             p = await client.get_profile()
             cur = _extract_currency(p)
         except: pass
-        # عند إرجاع needs_pin مبكراً من /api/login لا يُكمَل الهاندلر — يجب حفظ الجلسة هنا بعد نجاح connect + الأرصدة
+        # /api/login يعيد فوراً؛ النتيجة تُطبَّق في _on_qx_login_future_done — يجب ملء S هنا بعد نجاح connect
         S["real_balance"] = real
         S["demo_balance"] = demo
         S["currency"] = cur
@@ -1997,6 +2059,61 @@ async def _login_qx(email, password, S):
         err = str(e)
         S["login_error"] = err[:800]
         return {"ok":False,"pin":False,"msg":err}
+
+
+def _on_qx_login_future_done(email: str, S: dict, gen: int, fut):
+    """يُستدعى عند اكتمال _login_qx؛ يتجاهل النتيجة إن بدأ المستخدم تسجيل دخول أحدث."""
+    try:
+        r = fut.result()
+    except Exception as e:
+        if S.get("_login_gen") != gen:
+            return
+        log.exception("login: نتيجة مهمة الدخول")
+        S["login_pending"] = False
+        S["login_error"] = (str(e) or "فشل تسجيل الدخول")[:800]
+        return
+
+    if S.get("_login_gen") != gen:
+        if isinstance(r, dict) and r.get("ok") and r.get("client"):
+            try:
+                _loop = get_session_loop(email)
+                asyncio.run_coroutine_threadsafe(_close(r["client"]), _loop)
+            except Exception:
+                pass
+        return
+
+    S["login_pending"] = False
+
+    if r.get("pin"):
+        S["needs_pin"] = True
+        return
+
+    if not r.get("ok"):
+        msg = str(r.get("msg", "فشل"))
+        blocked_region = any(
+            x in msg.lower()
+            for x in (
+                "service unavailable",
+                "not available in your region",
+                "region",
+                "cloudflare",
+            )
+        )
+        if blocked_region:
+            S["login_error"] = "Quotex غير متاح من السيرفر/المنطقة الحالية. تعذر الدخول الحقيقي."
+        else:
+            S["login_error"] = msg[:800]
+        return
+
+    S["client"] = r["client"]
+    S["real_balance"] = r["real"]
+    S["demo_balance"] = r["demo"]
+    S["currency"] = r.get("cur", "USD")
+    S["logged_in"] = True
+    S["needs_pin"] = False
+    S["email"] = email
+    S["login_error"] = ""
+
 
 async def _do_trade(client, asset, amount, direction, acc):
     try:
@@ -2614,49 +2731,22 @@ async def login(req: LoginReq):
         S["email"] = req.email
         S["needs_pin"] = False
         S["login_error"] = ""
+        S["logged_in"] = False
+        S["_login_gen"] = int(S.get("_login_gen", 0) or 0) + 1
+        _lg = S["_login_gen"]
+        S["login_pending"] = True
         drain_pin_queue(req.email)
-        # connect() يستدعي input() ويُعلّق على queue حتى يصل PIN من /api/pin.
-        # إذا انتظرنا result(150) هنا، لا تُرسل الاستجابة أبداً → الواجهة لا تظهر حقل PIN.
+        # إرجاع فوري — Cloudflare/Nginx يقطعان الطلبات الطويلة (504). الواجهة تستطلع /api/status.
         _loop = get_session_loop(req.email)
         _fut = asyncio.run_coroutine_threadsafe(
             _login_qx(req.email, req.password, S), _loop
         )
-        _deadline = time.monotonic() + 150
-        r = None
-        while time.monotonic() < _deadline:
-            if _fut.done():
-                try:
-                    r = _fut.result()
-                except Exception as e:
-                    log.exception("login: نتيجة مهمة الدخول")
-                    raise HTTPException(500, str(e) or "فشل تسجيل الدخول")
-                break
-            if S.get("needs_pin"):
-                return {
-                    "success": False,
-                    "needs_pin": True,
-                    "message": "أدخل رمز التحقق (PIN) المرسل إلى بريدك أو تطبيق Quotex",
-                }
-            await asyncio.sleep(0.15)
-        else:
-            raise HTTPException(408, "انتهت مهلة تسجيل الدخول — أعد المحاولة")
-        if r.get("pin"):
-            S["needs_pin"]=True
-            return {"success":False,"needs_pin":True,"message":r.get("msg") or "أدخل PIN"}
-        if not r["ok"]:
-            msg = str(r.get("msg","فشل"))
-            # عند فشل Quotex لا ندخل محاكاة تلقائياً: يجب أن يكون الدخول حقيقي فقط.
-            blocked_region = any(x in msg.lower() for x in [
-                "service unavailable",
-                "not available in your region",
-                "region",
-                "cloudflare",
-            ])
-            if blocked_region:
-                raise HTTPException(403, "Quotex غير متاح من السيرفر/المنطقة الحالية. تعذر الدخول الحقيقي.")
-            raise HTTPException(401, msg)
-        S["client"]=r["client"]; S["real_balance"]=r["real"]
-        S["demo_balance"]=r["demo"]; S["currency"]=r.get("cur","USD")
+        _fut.add_done_callback(lambda f: _on_qx_login_future_done(req.email, S, _lg, f))
+        return {
+            "success": True,
+            "pending": True,
+            "message": "جاري الاتصال بـ Quotex… راقب الحالة من الواجهة",
+        }
     else:
         S["real_balance"]=0.0; S["demo_balance"]=10_000.0; S["currency"]="USD"
     S["logged_in"]=True; S["needs_pin"]=False; S["email"]=req.email
@@ -2690,8 +2780,10 @@ async def logout(req: TokenReq):
         if S.get("client"):
             try: run_async_for(S.get("email","_"), _close(S["client"]), _CLOSE_CLIENT_TIMEOUT_SEC)
             except: pass
-        S.update({"logged_in":False,"needs_pin":False,"login_error":"","trades":[],"wins":0,
-                  "losses":0,"session_profit":0.0,"current_trade":None,"client":None})
+        S.update({"logged_in":False,"needs_pin":False,"login_error":"","login_pending":False,
+                  "trades":[],"wins":0,"losses":0,"session_profit":0.0,"current_trade":None,
+                  "client":None})
+        S["_login_gen"] = int(S.get("_login_gen", 0) or 0) + 1
     return {"success":True}
 
 @app.post("/api/bot/start")
@@ -2736,7 +2828,14 @@ async def stop_ep(req: TokenReq):
 @app.get("/api/status")
 async def status(token: str=""):
     S = get_session(token)
-    if not S: return {"logged_in":False,"running":False,"needs_pin":False,"login_error":""}
+    if not S:
+        return {
+            "logged_in": False,
+            "running": False,
+            "needs_pin": False,
+            "login_error": "",
+            "login_pending": False,
+        }
     # تحديث دوري للرصيدين من Quotex (لإظهار الرصيد الحقيقي حتى بدون تشغيل البوت).
     if QX and S.get("logged_in") and S.get("client"):
         now = time.time()
@@ -2775,6 +2874,7 @@ async def status(token: str=""):
         "candle_source":  S.get("candle_source",""),
         "status_msg":     S.get("status_msg",""),
         "login_error":    (S.get("login_error") or "")[:800],
+        "login_pending":  bool(S.get("login_pending")),
     }
 
 if __name__ == "__main__":

@@ -736,8 +736,37 @@ async function doLogin(){
   if(!email||!email.includes('@'))return toast('بريد غير صحيح','er');if(pw.length<4)return toast('كلمة مرور قصيرة','er');
   const btn=document.getElementById('lBtn');btn.disabled=true;btn.textContent='⏳ جارٍ الاتصال...';
   const d=await api('/login','POST',{email,password:pw,token:s.token});
+  if(!d){btn.disabled=false;btn.textContent='تسجيل الدخول';return toast('تعذر الاتصال بالخادم','er');}
+  if(!d.success){btn.disabled=false;btn.textContent='تسجيل الدخول';return toast(d.detail||d.message||'فشل','er');}
+  if(d.pending){
+    btn.textContent='⏳ جارٍ الاتصال بـ Quotex...';
+    const t0=Date.now(),maxMs=180000;
+    while(Date.now()-t0<maxMs){
+      await new Promise(r=>setTimeout(r,350));
+      const st=await api('/status?token='+encodeURIComponent(s.token));
+      if(!st)continue;
+      if(st.needs_pin){
+        btn.disabled=false;btn.textContent='تسجيل الدخول';
+        document.getElementById('loginBox').style.display='none';
+        document.getElementById('pinBox').style.display='block';
+        document.getElementById('pinEmail').textContent=email;
+        const pe=document.getElementById('iPin');if(pe){pe.value='';requestAnimationFrame(()=>{pe.focus();pe.scrollIntoView({block:'nearest',behavior:'smooth'});});}
+        return toast('أدخل رمز PIN من البريد أو تطبيق Quotex','wa');
+      }
+      if(st.login_error){
+        btn.disabled=false;btn.textContent='تسجيل الدخول';
+        return toast(String(st.login_error).slice(0,400),'er');
+      }
+      if(st.logged_in){
+        btn.disabled=false;btn.textContent='تسجيل الدخول';
+        afterLogin({success:true,email:st.email||email,user_id:st.user_id,real_balance:st.real_balance,demo_balance:st.demo_balance,currency:st.currency,sim_mode:st.sim_mode});
+        return;
+      }
+    }
+    btn.disabled=false;btn.textContent='تسجيل الدخول';
+    return toast('انتهت مهلة الاتصال — أعد المحاولة','er');
+  }
   btn.disabled=false;btn.textContent='تسجيل الدخول';
-  if(!d)return toast('تعذر الاتصال بالخادم','er');
   if(d.needs_pin){
     document.getElementById('loginBox').style.display='none';
     document.getElementById('pinBox').style.display='block';
@@ -745,7 +774,6 @@ async function doLogin(){
     const pe=document.getElementById('iPin');if(pe){pe.value='';requestAnimationFrame(()=>{pe.focus();pe.scrollIntoView({block:'nearest',behavior:'smooth'});});}
     return toast('أدخل رمز PIN من البريد أو تطبيق Quotex','wa');
   }
-  if(!d.success)return toast(d.detail||d.message||'فشل','er');
   afterLogin(d);
 }
 async function doPin(){
