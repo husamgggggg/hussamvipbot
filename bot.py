@@ -171,8 +171,16 @@ def _install_pyquotex_proxy_websocket(ws_proxy: dict | None):
     from pyquotex import global_value as qx_gv
 
     async def _start_with_proxy(self):
-        if not hasattr(qx_gv, "SSID"):
-            setattr(qx_gv, "SSID", None)
+        for _k, _v in (
+            ("SSID", None),
+            ("check_websocket_if_connect", None),
+            ("check_websocket_if_error", False),
+            ("websocket_error_reason", None),
+            ("check_rejected_connection", False),
+            ("check_accepted_connection", False),
+        ):
+            if not hasattr(qx_gv, _k):
+                setattr(qx_gv, _k, _v)
         qx_gv.check_websocket_if_connect = None
         qx_gv.check_websocket_if_error = False
         qx_gv.websocket_error_reason = None
@@ -209,15 +217,16 @@ def _install_pyquotex_proxy_websocket(ws_proxy: dict | None):
         self.websocket_thread.daemon = True
         self.websocket_thread.start()
         while True:
-            if qx_gv.check_websocket_if_error:
-                return False, qx_gv.websocket_error_reason
-            if qx_gv.check_websocket_if_connect == 0:
+            if getattr(qx_gv, "check_websocket_if_error", False):
+                return False, getattr(qx_gv, "websocket_error_reason", None)
+            cwi = getattr(qx_gv, "check_websocket_if_connect", None)
+            if cwi == 0:
                 qapi.logger.debug("Websocket connection closed.")
                 return False, "Websocket connection closed."
-            if qx_gv.check_websocket_if_connect == 1:
+            if cwi == 1:
                 qapi.logger.debug("Websocket connected successfully!!!")
                 return True, "Websocket connected successfully!!!"
-            if qx_gv.check_rejected_connection == 1:
+            if getattr(qx_gv, "check_rejected_connection", False) == 1:
                 setattr(qx_gv, "SSID", None)
                 qapi.logger.debug("Websocket Token Rejected.")
                 return True, "Websocket Token Rejected."
