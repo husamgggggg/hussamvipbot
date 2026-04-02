@@ -154,7 +154,12 @@ def _acquire_single_instance_lock():
     """
     يمنع تشغيل أكثر من `python bot.py` على نفس الجهاز.
     إن ظهرت PIDs مختلفة كل ثوانٍ في اللوج فالسبب غالباً systemd/حلقة shell أو عدة خدمات — هذا يقلّل التصادم على المنفذ والجلسات.
+    لتعطيل القفل (تشخيص فقط): BOT_SINGLE_INSTANCE_LOCK=0
     """
+    raw = (os.getenv("BOT_SINGLE_INSTANCE_LOCK") or "1").strip().lower()
+    if raw in ("0", "false", "no", "off"):
+        log.warning("BOT_SINGLE_INSTANCE_LOCK=0 — القفل معطّل (خطر تشغيل نسختين)")
+        return None
     try:
         import fcntl
     except ImportError:
@@ -175,10 +180,12 @@ def _acquire_single_instance_lock():
         f.close()
         port = int(os.getenv("PORT", "8000"))
         log.error(
-            "رفض التشغيل: يوجد بوت يعمل مسبقاً (آخر PID في %s: %s). "
-            "تحقق من: pgrep -af bot.py | systemctl | while true; do python… — ثم أوقف المكرر أو fuser -k %s/tcp",
+            "رفض التشغيل: نسخة أخرى تعمل (PID في %s: %s). "
+            "إذا curl http://127.0.0.1:%s/ يعطي 200 فلا حاجة لإعادة التشغيل. "
+            "للإيقاف ثم تشغيل واحد: pkill -9 -f bot.py; sleep 2; fuser -k %s/tcp; sleep 1",
             lock_path,
             prev or "?",
+            port,
             port,
         )
         sys.exit(1)
