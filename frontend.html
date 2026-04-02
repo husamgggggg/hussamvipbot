@@ -699,10 +699,44 @@ function renderPairOption(asset){
   const [b,q]=pairFlags(asset);
   return `<div class="oi-row"><div class="oi-main"><span class="oi-check">✓</span></div><div class="oi-main"><span class="oi-name">${pairLabel(asset)}</span><img class="oi-flag" src="https://flagcdn.com/w20/${b}.png" alt="${b}"><img class="oi-flag" src="https://flagcdn.com/w20/${q}.png" alt="${q}"></div></div>`;
 }
-async function api(path,method='GET',body=null){try{const r=await fetch('/api'+path,{method,headers:{'Content-Type':'application/json'},body:body?JSON.stringify(body):null});return await r.json();}catch{return null;}}
+function apiErrMsg(d){
+  if(!d)return 'تعذر الاتصال بالخادم';
+  const x=d.detail;
+  if(Array.isArray(x))return String((x[0]&&(x[0].msg||x[0].message))||JSON.stringify(x)).slice(0,280);
+  if(typeof x==='string')return x.slice(0,400);
+  if(d._bodySnippet)return String(d._bodySnippet).slice(0,320);
+  if(d._httpStatus===504)return 'انتهت مهلة الخادم (504) — جرّب مرة أخرى';
+  if(d._httpStatus)return 'HTTP '+d._httpStatus;
+  return 'خطأ غير معروف';
+}
+async function api(path,method='GET',body=null){
+  try{
+    const r=await fetch('/api'+path,{
+      method,
+      credentials:'same-origin',
+      headers:{'Content-Type':'application/json'},
+      body:body?JSON.stringify(body):null
+    });
+    const raw=await r.text();
+    let data={};
+    if(raw){
+      try{
+        const j=JSON.parse(raw);
+        data=(j!==null&&typeof j==='object')?j:{_wrap:j};
+      }catch{
+        data={_parseError:true,_bodySnippet:raw.slice(0,500)};
+      }
+    }
+    data._httpStatus=r.status;
+    data._httpOk=r.ok;
+    return data;
+  }catch(e){
+    return null;
+  }
+}
 async function checkConn(){
-  const d=await api('/status?token='+s.token);
-  if(d && typeof d.sim_mode==='boolean') s.sim=!!d.sim_mode;
+  const d=await api('/status?token='+encodeURIComponent(s.token||''));
+  if(d&&d._httpOk&&typeof d.sim_mode==='boolean') s.sim=!!d.sim_mode;
   renderBadge();
 }
 function renderBadge(){
@@ -737,7 +771,8 @@ async function doLogin(){
   const btn=document.getElementById('lBtn');btn.disabled=true;btn.textContent='⏳ جارٍ الاتصال...';
   const d=await api('/login','POST',{email,password:pw,token:s.token});
   if(!d){btn.disabled=false;btn.textContent='تسجيل الدخول';return toast('تعذر الاتصال بالخادم','er');}
-  if(!d.success){btn.disabled=false;btn.textContent='تسجيل الدخول';return toast(d.detail||d.message||'فشل','er');}
+  if(!d._httpOk){btn.disabled=false;btn.textContent='تسجيل الدخول';return toast(apiErrMsg(d),'er');}
+  if(!d.success){btn.disabled=false;btn.textContent='تسجيل الدخول';return toast(d.message||apiErrMsg(d)||'فشل','er');}
   if(d.pending){
     btn.textContent='⏳ جارٍ الاتصال بـ Quotex...';
     const t0=Date.now(),maxMs=180000;
@@ -745,6 +780,7 @@ async function doLogin(){
       await new Promise(r=>setTimeout(r,350));
       const st=await api('/status?token='+encodeURIComponent(s.token));
       if(!st)continue;
+      if(st._httpOk===false)continue;
       if(st.needs_pin){
         btn.disabled=false;btn.textContent='تسجيل الدخول';
         document.getElementById('loginBox').style.display='none';
@@ -781,13 +817,15 @@ async function doPin(){
   const btn=document.getElementById('pinBtn');btn.disabled=true;btn.textContent='⏳ جارٍ الإرسال...';
   const d=await api('/pin','POST',{pin:String(pin),token:s.token});
   if(!d){btn.disabled=false;btn.textContent='تأكيد الرمز';return toast('تعذر الاتصال بالخادم','er');}
-  if(!d.success){btn.disabled=false;btn.textContent='تأكيد الرمز';return toast(d.detail||d.message||'فشل','er');}
+  if(!d._httpOk){btn.disabled=false;btn.textContent='تأكيد الرمز';return toast(apiErrMsg(d),'er');}
+  if(!d.success){btn.disabled=false;btn.textContent='تأكيد الرمز';return toast(d.message||apiErrMsg(d)||'فشل','er');}
   if(d.pending){
     btn.textContent='⏳ جارٍ التحقق...';
     const t0=Date.now(),maxMs=180000;
     while(Date.now()-t0<maxMs){
       await new Promise(r=>setTimeout(r,350));
       const st=await api('/status?token='+encodeURIComponent(s.token));
+      if(st&&st._httpOk===false)continue;
       if(st&&st.login_error){
         btn.disabled=false;btn.textContent='تأكيد الرمز';
         return toast(String(st.login_error).slice(0,400),'er');
@@ -809,6 +847,7 @@ function afterLogin(d){
   s.sim=!!d.sim_mode;
   renderBadge();
   s.email=d.email;s.uid='#'+d.user_id;s.rBal=d.real_balance||0;s.dBal=d.demo_balance||0;s.currency=d.currency||'USD';
+  if(s.token&&s.email)localStorage.setItem('at_token_'+s.email,s.token);
   document.getElementById('hId').textContent=s.uid;document.getElementById('hEm').textContent=s.email;document.getElementById('dEm').textContent=s.email;
   document.getElementById('pinBox').style.display='none';document.getElementById('loginBox').style.display='block';
   updBals();toast('✅ مرحباً بك في فريق عبود تريدر','ok');go('sBot',2);if(!s.sim)startPoll();
@@ -823,14 +862,21 @@ async function doStart(){
   const pl=s.pOn?(parseFloat(document.getElementById('iPL').value)||0):0;
   const sl=s.sOn?(parseFloat(document.getElementById('iSL').value)||0):0;
   if(amt<=0)return toast('أدخل مبلغ صحيح','er');
+  if(!s.token)return toast('انتهت الجلسة — أعد تسجيل الدخول','er');
   const assetList=s.assets.length>0?s.assets:[s.asset];
   const body={asset:assetList[0],assets:assetList,amount:amt,strategy:s.strategy,account_type:s.acc,profit_limit:pl,stop_loss:sl,token:s.token};
-  if(!s.sim){const d=await api('/bot/start','POST',body);if(d&&!d.success)return toast(d.detail||'فشل','er');}
+  if(!s.sim){
+    const st=await api('/status?token='+encodeURIComponent(s.token));
+    if(!st||!st._httpOk)return toast(apiErrMsg(st)||'تعذر التحقق من الجلسة','er');
+    if(!st.logged_in)return toast('أكمل تسجيل الدخول أولاً وانتظر «متصل» ثم أعد المحاولة','er');
+    const d=await api('/bot/start','POST',body);
+    if(!d||!d._httpOk||d.success===false)return toast(apiErrMsg(d)||'فشل تشغيل البوت','er');
+  }
   s.running=true;document.getElementById('stBtn').textContent='إيقاف البوت';document.getElementById('stBtn').classList.add('stop');
   toast('تم تشغيل البوت بنجاح','ok');if(s.sim)simCycle(amt,pl,sl);
 }
 async function doStop(){
-  if(!s.sim)await api('/bot/stop','POST',{token:s.token});
+  if(!s.sim){const d=await api('/bot/stop','POST',{token:s.token});if(d&&d._httpOk===false)toast(apiErrMsg(d),'wa');}
   s.running=false;clearTimeout(s.simT);clearInterval(pgInt);
   document.getElementById('ov').classList.remove('on');
   document.getElementById('stBtn').textContent='ابدأ التداول';document.getElementById('stBtn').classList.remove('stop');
@@ -882,7 +928,7 @@ function showTradePopup(msg){
 }
 function startPoll(){
   s.pollInt=setInterval(async()=>{
-    const d=await api('/status?token='+s.token);if(!d)return;
+    const d=await api('/status?token='+encodeURIComponent(s.token||''));if(!d||!d._httpOk)return;
     s.rBal=d.real_balance;s.dBal=d.demo_balance;if(d.currency)s.currency=d.currency;
     s.wins=d.wins;s.losses=d.losses;s.profit=d.session_profit||0;
     updBals();updStats();
@@ -1143,7 +1189,7 @@ if(_em){
   if(_tk){
     s.token=_tk;s.email=_em;
     (async()=>{
-      const d=await api('/status?token='+_tk);
+      const d=await api('/status?token='+encodeURIComponent(_tk));
       if(d&&d.logged_in){
         s.sim=!!d.sim_mode;
         s.email=d.email||_em;s.rBal=d.real_balance||0;s.dBal=d.demo_balance||0;
