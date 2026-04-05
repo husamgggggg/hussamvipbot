@@ -442,11 +442,15 @@ _configure_quiet_loggers()
 
 USERS_F  = "data/users.json"
 ADMIN_PW = os.getenv("ADMIN_PW", "Admin@2024")
+# للوصول عبر IP بدون دومين: export ALLOWED_ORIGINS='*' (أو أضف http://YOUR_IP:8000)
 _ALLOWED_ORIGINS_RAW = os.getenv(
     "ALLOWED_ORIGINS",
     "http://localhost:8000,http://127.0.0.1:8000",
-)
-ALLOWED_ORIGINS = [o.strip() for o in _ALLOWED_ORIGINS_RAW.split(",") if o.strip()]
+).strip()
+if _ALLOWED_ORIGINS_RAW == "*":
+    ALLOWED_ORIGINS = ["*"]
+else:
+    ALLOWED_ORIGINS = [o.strip() for o in _ALLOWED_ORIGINS_RAW.split(",") if o.strip()]
 if not ALLOWED_ORIGINS:
     ALLOWED_ORIGINS = ["http://localhost:8000"]
 if ADMIN_PW == "Admin@2024":
