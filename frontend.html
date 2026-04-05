@@ -522,7 +522,7 @@ h1{font-size:18px;}
   <div class="sl">الإعدادات</div>
   <div class="sc">
     <div class="sr" onclick="om('assets')"><div class="sv"><span id="vAsset" style="font-size:11px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">EURUSD OTC</span><span class="ch">‹</span></div><div class="slb">الأزواج المختارة</div></div>
-    <div class="sr" onclick="om('strategy')"><div class="sv"><span id="vStrat">HUSAAM</span><span class="ch">‹</span></div><div class="slb">الاستراتيجية</div></div>
+    <div class="sr" onclick="om('strategy')"><div class="sv"><span id="vStrat">عبود</span><span class="ch">‹</span></div><div class="slb">الاستراتيجية</div></div>
   </div>
   <div class="sl">المبلغ والحدود</div>
   <div class="irow">
@@ -638,7 +638,7 @@ h1{font-size:18px;}
   <div class="lvc">
     <button class="lvc-close" onclick="closeLiveByUser()" title="إغلاق">×</button>
     <div class="lp" id="lPair">EURUSD</div>
-    <div class="lsub" id="lStrat">HUSAAM STRATEGY</div>
+    <div class="lsub" id="lStrat">عبود</div>
     <div class="ld up" id="lDir">▲ شراء</div>
     <div class="lm">
       <div class="lmi"><div class="lml">المبلغ</div><div class="lmv" id="lAmt">10</div></div>
@@ -684,10 +684,10 @@ function tickSimPayouts(){
 }
 setInterval(tickSimPayouts, 9000);
 const STRATEGIES=[
-  {key:'HUSAAM',label:'Abood',sub:'منهجية متعددة المؤشرات لفرص التداول عالية الجودة'},
-  {key:'HUSAAM_EMA10',label:'Abood EMA10',sub:'ارتدادات EMA10 على شموع الدقيقة مع تأكيد مغلق'}
+  {key:'HUSAAM',label:'عبود',sub:'منهجية متعددة المؤشرات لفرص التداول عالية الجودة'},
+  {key:'HUSAAM_EMA10',label:'عبود EMA10',sub:'ارتدادات EMA10 على شموع الدقيقة مع تأكيد مغلق'}
 ];
-const STRAT_LABELS={HUSAAM:'Abood',HUSAAM_EMA10:'EMA10'};
+const STRAT_LABELS={HUSAAM:'عبود',HUSAAM_EMA10:'عبود EMA10'};
 function pairFlags(asset){
   const p=asset.replace('_otc','');
   const b=p.slice(0,3),q=p.slice(3,6);
@@ -913,7 +913,7 @@ function showLive(asset,dir,secs,tradeId=''){
   const ov=document.getElementById('ov');
   ov.dataset.tradeId=tradeId||'';
   document.getElementById('lPair').textContent=asset.replace('_otc',' OTC');
-  document.getElementById('lStrat').textContent=(STRAT_LABELS[s.strategy]||s.strategy).toUpperCase()+' STRATEGY';
+  document.getElementById('lStrat').textContent=STRAT_LABELS[s.strategy]||s.strategy;
   document.getElementById('lDir').textContent=isUp?'▲ شراء':'▼ بيع';
   document.getElementById('lDir').className='ld '+(isUp?'up':'dn');
   document.getElementById('lAmt').textContent=(document.getElementById('iAmt').value||10)+' '+s.currency;
@@ -1064,8 +1064,8 @@ const HELP={
     body:`
       <div style="padding:8px 2px 2px;color:var(--tx);font-size:14px;font-weight:800;line-height:1.8;">
         الأفضل يعتمد على السوق، لكن عادةً:
-        <br>- إن كنت تريد فرصاً أكثر: جرّب استراتيجيات EMA10 أو HUSAAM بعد تعديل الحدود.
-        <br>- إن كنت تريد تأكيد أعلى: جرّب HUSAAM_PRIVATE أو الوضع الصارم (HUSAAM).
+        <br>- إن كنت تريد فرصاً أكثر: جرّب «عبود EMA10» أو «عبود» بعد تعديل الحدود.
+        <br>- إن كنت تريد تأكيد أعلى: جرّب الوضع الصارم أو استراتيجية عبود مع حدود أدق.
         <br><br>ابدأ بـ Demo ثم قيّم Win Rate وربح/خسارة الجلسة.
       </div>
     `
