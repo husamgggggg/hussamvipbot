@@ -3,19 +3,21 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>Abood Trader | منصة التداول</title>
+<title>NEXO TRADE | منصة التداول</title>
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="theme-color" content="#052e18">
+<meta name="theme-color" content="#050810">
+<link rel="icon" type="image/png" sizes="192x192" href="/pwa/icon-192.png">
 <link rel="manifest" href="/manifest.json">
+<link rel="apple-touch-icon" href="/pwa/icon-192.png">
 <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;600;700;900&display=swap" rel="stylesheet">
 <style>
 :root{
-  --bg:#050f0a;--bg2:#071a10;--card:#0c1f14;--card2:#0f2418;
-  --br:#163828;--br2:#1e4834;--g:#22c55e;--g2:#16a34a;--g3:rgba(34,197,94,.12);
-  --r:#ff4060;--r2:#cc2040;--or:#fbbf24;--gold:#86efac;--gold2:#bbf7d0;
-  --tx:#ecfdf5;--tx2:#c4e8d4;--mu:#3d5c4a;--mu2:#5a7a68;--mu3:#7a9a88;
-  --cyan:#4ade80;--purple:#15803d;
+  --bg:#050810;--bg2:#080d1a;--card:#0d1425;--card2:#111830;
+  --br:#1a2540;--br2:#243050;--g:#00e5a0;--g2:#00c080;--g3:rgba(0,229,160,.08);
+  --r:#ff4060;--r2:#cc2040;--or:#ffb020;--gold:#e0b840;--gold2:#f8e080;
+  --tx:#eef2ff;--tx2:#c0cce8;--mu:#3a4a6a;--mu2:#5a6a8a;--mu3:#8090b0;
+  --cyan:#00d4ff;--purple:#8060ff;
 }
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
 body{font-family:'Roboto',sans-serif;font-size:16px;font-weight:700;background:var(--bg);color:var(--tx);min-height:100dvh;display:flex;justify-content:center;overflow-x:hidden;}
@@ -23,10 +25,10 @@ body{font-family:'Roboto',sans-serif;font-size:16px;font-weight:700;background:v
 .scr{display:none;flex-direction:column;min-height:100dvh;padding-bottom:76px;}
 .scr.on{display:flex;}
 .bg-fx{position:fixed;top:0;left:50%;transform:translateX(-50%);width:100%;max-width:430px;height:100dvh;pointer-events:none;z-index:0;overflow:hidden;}
-.bg-fx::before{content:'';position:absolute;top:-30%;left:-10%;width:320px;height:320px;background:radial-gradient(circle,rgba(34,197,94,.12) 0%,transparent 65%);animation:fx1 5s ease-in-out infinite;}
-.bg-fx::after{content:'';position:absolute;bottom:-10%;right:-10%;width:280px;height:280px;background:radial-gradient(circle,rgba(22,163,74,.1) 0%,transparent 65%);animation:fx1 7s ease-in-out infinite reverse;}
+.bg-fx::before{content:'';position:absolute;top:-30%;left:-10%;width:320px;height:320px;background:radial-gradient(circle,rgba(0,229,160,.08) 0%,transparent 65%);animation:fx1 5s ease-in-out infinite;}
+.bg-fx::after{content:'';position:absolute;bottom:-10%;right:-10%;width:280px;height:280px;background:radial-gradient(circle,rgba(128,96,255,.07) 0%,transparent 65%);animation:fx1 7s ease-in-out infinite reverse;}
 @keyframes fx1{0%,100%{transform:scale(1);opacity:.7}50%{transform:scale(1.15);opacity:1}}
-.hdr{background:rgba(5,15,10,.92);backdrop-filter:blur(24px);padding:10px 16px;border-bottom:1px solid rgba(34,197,94,.12);display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:50;}
+.hdr{background:rgba(5,8,16,.92);backdrop-filter:blur(24px);padding:10px 16px;border-bottom:1px solid rgba(0,229,160,.1);display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:50;}
 .logo-wrap{display:flex;flex-direction:column;}
 .logo-top{font-size:9px;font-weight:700;color:var(--g);letter-spacing:3px;text-transform:uppercase;opacity:.7;}
 .logo-main{font-size:17px;font-weight:900;color:var(--tx);letter-spacing:-0.5px;line-height:1.1;}
@@ -34,16 +36,27 @@ body{font-family:'Roboto',sans-serif;font-size:16px;font-weight:700;background:v
 .hdr-r{text-align:right;}
 .hdr-id{font-size:12px;color:var(--gold);font-weight:700;}
 .hdr-em{font-size:10px;color:var(--mu3);margin-top:1px;}
-.nav{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:430px;background:rgba(5,15,10,.97);backdrop-filter:blur(24px);border-top:1px solid rgba(34,197,94,.1);display:grid;grid-template-columns:repeat(4,1fr);z-index:100;}
+.nav{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:430px;background:rgba(5,8,16,.97);backdrop-filter:blur(24px);border-top:1px solid rgba(0,229,160,.08);display:grid;grid-template-columns:repeat(4,1fr);z-index:100;}
 .ni{display:flex;flex-direction:column;align-items:center;padding:9px 0 7px;cursor:pointer;color:var(--mu2);font-size:9px;gap:3px;transition:all .3s;position:relative;}
-.ni.on{color:var(--g);}
-.ni.on::before{content:'';position:absolute;top:0;left:25%;right:25%;height:2px;background:linear-gradient(90deg,transparent,var(--g),transparent);border-radius:0 0 3px 3px;}
-.ni svg{width:19px;height:19px;transition:transform .2s;}
-.ni.on svg{transform:scale(1.1);}
+.ni.on{color:var(--cyan);text-shadow:0 0 14px rgba(77,183,255,.4);}
+.ni.on::before{content:'';position:absolute;top:0;left:22%;right:22%;height:2px;background:linear-gradient(90deg,transparent,var(--cyan),transparent);border-radius:0 0 3px 3px;box-shadow:0 0 10px rgba(77,183,255,.55);}
+.ni svg{width:19px;height:19px;transition:transform .2s, filter .2s;}
+.ni.on svg{transform:scale(1.12);filter:drop-shadow(0 0 4px rgba(77,183,255,.95)) drop-shadow(0 0 12px rgba(77,183,255,.45));}
 #sReg{justify-content:center;align-items:center;padding:20px 18px;min-height:100dvh;position:relative;z-index:1;}
 .hero{text-align:center;margin-bottom:22px;}
-.hero-badge{display:inline-flex;align-items:center;gap:6px;background:rgba(34,197,94,.08);border:1px solid rgba(34,197,94,.25);border-radius:20px;padding:5px 16px;font-size:10px;color:var(--g);font-weight:700;letter-spacing:1.5px;margin-bottom:16px;text-transform:uppercase;}
-.hero-icon{font-size:52px;margin-bottom:10px;filter:drop-shadow(0 0 20px rgba(34,197,94,.3));}
+.hero-badge{display:inline-flex;align-items:center;gap:6px;background:rgba(0,229,160,.08);border:1px solid rgba(0,229,160,.25);border-radius:20px;padding:5px 16px;font-size:10px;color:var(--g);font-weight:700;letter-spacing:1.5px;margin-bottom:16px;text-transform:uppercase;}
+.hero-icon{font-size:52px;margin-bottom:10px;filter:drop-shadow(0 0 20px rgba(0,229,160,.3));}
+.hero-logo-img{
+  width:88px;
+  height:88px;
+  border-radius:22px;
+  object-fit:contain;
+  background:transparent;
+  border:none;
+  box-shadow:none;
+  /* إن كانت الخلفية في الملف سوداء وليست شفافة: يدمجها مع خلفية الصفحة الداكنة */
+  mix-blend-mode:lighten;
+}
 .hero-title{font-size:28px;font-weight:900;color:var(--tx);line-height:1.2;margin-bottom:4px;}
 .hero-title em{font-style:normal;color:var(--tx);}
 .hero-sub{font-size:12px;color:var(--mu3);line-height:1.9;margin-top:6px;}
@@ -55,32 +68,42 @@ body{font-family:'Roboto',sans-serif;font-size:16px;font-weight:700;background:v
 .fg label{font-size:10px;color:var(--mu3);margin-bottom:5px;display:block;font-weight:700;letter-spacing:.8px;text-transform:uppercase;}
 .fg input{width:100%;background:var(--bg2);border:1.5px solid var(--br);border-radius:12px;padding:12px 15px;color:var(--tx);font-family:'Roboto',sans-serif;font-size:14px;outline:none;transition:all .2s;direction:ltr;text-align:left;}
 .fg input[type=text]{direction:rtl;text-align:right;}
-.fg input:focus{border-color:var(--g);box-shadow:0 0 0 3px rgba(34,197,94,.1);}
+.fg input:focus{border-color:var(--g);box-shadow:0 0 0 3px rgba(0,229,160,.1);}
 .fg input::placeholder{color:var(--mu);}
-.pbtn{width:100%;background:linear-gradient(135deg,var(--g),var(--g2));color:var(--bg);border:none;border-radius:13px;padding:14px;font-size:14px;font-weight:900;font-family:'Roboto',sans-serif;cursor:pointer;margin-top:4px;transition:all .2s;box-shadow:0 4px 20px rgba(34,197,94,.25);}
+.pbtn{width:100%;background:linear-gradient(135deg,var(--g),var(--g2));color:var(--bg);border:none;border-radius:13px;padding:14px;font-size:14px;font-weight:900;font-family:'Roboto',sans-serif;cursor:pointer;margin-top:4px;transition:all .2s;box-shadow:0 4px 20px rgba(0,229,160,.25);}
 .pbtn:active{transform:scale(.98);}
 .pbtn:disabled{opacity:.5;cursor:not-allowed;}
 .lnk{font-size:11px;color:var(--g);text-align:center;margin-top:13px;cursor:pointer;opacity:.7;line-height:1.8;}
 .bdg{display:inline-flex;align-items:center;gap:5px;padding:4px 12px;border-radius:20px;font-size:10px;font-weight:700;margin-bottom:12px;}
-.bdg.live{background:rgba(34,197,94,.08);border:1px solid rgba(34,197,94,.2);color:var(--tx);}
+.bdg.live{background:rgba(0,229,160,.08);border:1px solid rgba(0,229,160,.2);color:var(--tx);}
 .bdg.sim{background:rgba(255,176,32,.08);border:1px solid rgba(255,176,32,.2);color:var(--or);}
 .dot{width:6px;height:6px;border-radius:50%;background:currentColor;animation:blink 1.5s infinite;}
 @keyframes blink{0%,100%{opacity:1}50%{opacity:.2}}
 .pinbox{text-align:center;padding:6px 0 14px;}
 .pinbox .icon{font-size:40px;margin-bottom:8px;}
-.elite-banner{background:linear-gradient(135deg,rgba(34,197,94,.12),rgba(22,163,74,.06));border:1px solid rgba(34,197,94,.22);border-radius:16px;padding:14px 18px;margin-bottom:18px;text-align:center;position:relative;overflow:hidden;}
-.elite-banner::before{content:'';position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,var(--g),transparent);}
-.elite-text{font-size:17px;font-weight:900;color:var(--g);letter-spacing:1px;}
-.elite-sub{font-size:11px;color:var(--gold2);opacity:.75;margin-top:3px;}
+.pin-logo-img{
+  width:70px;
+  height:70px;
+  border-radius:18px;
+  object-fit:contain;
+  background:transparent;
+  border:none;
+  box-shadow:none;
+  mix-blend-mode:lighten;
+}
+.elite-banner{background:linear-gradient(135deg,rgba(224,184,64,.1),rgba(224,184,64,.04));border:1px solid rgba(224,184,64,.25);border-radius:16px;padding:14px 18px;margin-bottom:18px;text-align:center;position:relative;overflow:hidden;}
+.elite-banner::before{content:'';position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,var(--gold),transparent);}
+.elite-text{font-size:17px;font-weight:900;color:var(--gold);letter-spacing:1px;}
+.elite-sub{font-size:11px;color:var(--gold2);opacity:.6;margin-top:3px;}
 .acc-hero{padding:18px 16px 16px;border-bottom:1px solid var(--br);position:relative;overflow:hidden;background:linear-gradient(135deg,var(--card) 0%,var(--card2) 100%);}
-.acc-hero::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,var(--g2),var(--g),#4ade80);}
+.acc-hero::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,var(--purple),var(--g),var(--cyan));}
 .acc-badge{font-size:10px;font-weight:700;color:var(--g);letter-spacing:2px;text-transform:uppercase;margin-bottom:5px;display:flex;align-items:center;gap:5px;}
 .acc-badge::before{content:'▲';font-size:7px;color:var(--g);}
 .acc-name{font-size:17px;font-weight:900;color:var(--tx);}
-.acc-conn{display:inline-flex;align-items:center;gap:5px;margin-top:6px;background:rgba(34,197,94,.08);border:1px solid rgba(34,197,94,.15);border-radius:20px;padding:3px 10px;font-size:10px;color:var(--g);}
+.acc-conn{display:inline-flex;align-items:center;gap:5px;margin-top:6px;background:rgba(0,229,160,.08);border:1px solid rgba(0,229,160,.15);border-radius:20px;padding:3px 10px;font-size:10px;color:var(--g);}
 .balrow{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:12px 14px 8px;}
 .balcard{background:var(--card);border:1px solid var(--br);border-radius:16px;padding:14px;position:relative;overflow:hidden;transition:all .2s;}
-.balcard::before{content:'';position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,rgba(34,197,94,.2),transparent);}
+.balcard::before{content:'';position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,rgba(0,229,160,.2),transparent);}
 .bl{font-size:12px;color:var(--mu3);margin-bottom:7px;letter-spacing:.8px;font-weight:900;}
 .ba{font-size:21px;font-weight:900;color:var(--tx);}
 .bu{font-size:16px;color:var(--tx);font-weight:900;margin-left:3px;}
@@ -99,9 +122,9 @@ body{font-family:'Roboto',sans-serif;font-size:16px;font-weight:700;background:v
 .sl{font-size:13px;font-weight:900;padding:14px 16px 7px;color:var(--mu3);letter-spacing:1.6px;text-transform:uppercase;}
 .agrd{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:0 14px 10px;}
 .ao{background:var(--card);border:1.5px solid var(--br);border-radius:14px;padding:13px;text-align:center;cursor:pointer;transition:all .2s;}
-.ao.sel{border-color:rgba(34,197,94,.45);background:rgba(34,197,94,.06);box-shadow:0 0 0 3px rgba(34,197,94,.06);}
+.ao.sel{border-color:rgba(77,183,255,.45);background:rgba(77,183,255,.06);box-shadow:0 0 0 3px rgba(77,183,255,.06);}
 .at{font-size:11px;color:var(--mu3);margin-bottom:5px;letter-spacing:.8px;font-weight:900;}
-#bReal .at{color:rgba(34,197,94,.95);}
+#bReal .at{color:rgba(77,183,255,.95);}
 #bDemo .at{color:rgba(255,176,32,.95);}
 .ab{font-size:17px;font-weight:900;color:var(--tx);}
 .ar{
@@ -120,30 +143,30 @@ body{font-family:'Roboto',sans-serif;font-size:16px;font-weight:700;background:v
   margin-top:8px;
   transition:all .2s;
 }
-#bReal.sel{border-color:rgba(34,197,94,.6);background:rgba(34,197,94,.08);box-shadow:0 0 0 3px rgba(34,197,94,.08);}
+#bReal.sel{border-color:rgba(77,183,255,.6);background:rgba(77,183,255,.08);box-shadow:0 0 0 3px rgba(77,183,255,.08);}
 #bDemo.sel{border-color:rgba(255,176,32,.6);background:rgba(255,176,32,.08);box-shadow:0 0 0 3px rgba(255,176,32,.08);}
-#bReal.sel .ar{border-color:rgba(34,197,94,.95);background:rgba(34,197,94,.22);color:#fff;box-shadow:0 0 10px rgba(34,197,94,.25);}
+#bReal.sel .ar{border-color:rgba(77,183,255,.95);background:rgba(77,183,255,.22);color:#fff;box-shadow:0 0 10px rgba(77,183,255,.25);}
 #bDemo.sel .ar{border-color:rgba(255,176,32,.95);background:rgba(255,176,32,.22);color:#fff;box-shadow:0 0 10px rgba(255,176,32,.22);}
-#bReal.sel:active{box-shadow:0 0 0 3px rgba(34,197,94,.22), 0 16px 40px rgba(34,197,94,.22);transform:scale(.98);}
+#bReal.sel:active{box-shadow:0 0 0 3px rgba(77,183,255,.22), 0 16px 40px rgba(77,183,255,.22);transform:scale(.98);}
 #bDemo.sel:active{box-shadow:0 0 0 3px rgba(255,176,32,.22), 0 16px 40px rgba(255,176,32,.22);transform:scale(.98);}
 .sc{background:var(--card);margin:0 14px 10px;border-radius:14px;border:1px solid var(--br);overflow:hidden;}
 .sr{padding:14px 16px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--br);cursor:pointer;transition:background .15s;}
 .sr:last-child{border-bottom:none;}
 .sr:active{background:var(--g3);}
 .slb{font-size:11px;color:var(--mu3);}
-.sv{font-size:14px;font-weight:900;display:flex;align-items:center;gap:5px;color:var(--tx);}
+.sv{font-size:14px;font-weight:900;display:flex;align-items:center;gap:5px;color:var(--tx);min-width:0;flex:1;}
 .irow{background:var(--card);margin:0 14px 10px;border-radius:14px;border:1px solid var(--br);overflow:hidden;}
 .iitem{padding:12px 16px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--br);}
 .iitem:last-child{border-bottom:none;}
 .ilabel{font-size:14px;color:var(--mu3);flex-shrink:0;font-weight:900;}
 .iinput{background:var(--bg2);border:1.5px solid var(--br);border-radius:10px;padding:8px 12px;color:var(--tx);font-family:'Roboto',sans-serif;font-size:16px;font-weight:900;outline:none;text-align:center;width:128px;transition:all .2s;}
-.iinput:focus{border-color:var(--g);box-shadow:0 0 0 2px rgba(34,197,94,.1);}
+.iinput:focus{border-color:var(--g);box-shadow:0 0 0 2px rgba(0,229,160,.1);}
 .iunit{font-size:18px;color:var(--tx);font-weight:900;flex-shrink:0;}
 .stepper{display:flex;align-items:center;gap:10px;}
 .stepBtn{
   width:38px;height:38px;border-radius:14px;
-  border:1.5px solid rgba(34,197,94,.28);
-  background:rgba(34,197,94,.08);
+  border:1.5px solid rgba(77,183,255,.28);
+  background:rgba(77,183,255,.08);
   color:var(--tx);
   font-size:22px;font-weight:900;
   cursor:pointer;
@@ -154,27 +177,27 @@ body{font-family:'Roboto',sans-serif;font-size:16px;font-weight:700;background:v
 .stepBtn:disabled{opacity:.45;cursor:not-allowed;transform:none;}
 .rc{background:var(--card);margin:0 14px 10px;border-radius:14px;border:1px solid var(--br);padding:15px;}
 .togrow{display:flex;justify-content:space-between;align-items:center;padding:5px 0;}
-.tog{width:44px;height:25px;background:var(--g);border-radius:13px;position:relative;cursor:pointer;transition:background .2s;flex-shrink:0;box-shadow:0 2px 8px rgba(34,197,94,.2);}
+.tog{width:44px;height:25px;background:var(--g);border-radius:13px;position:relative;cursor:pointer;transition:background .2s;flex-shrink:0;box-shadow:0 2px 8px rgba(0,229,160,.2);}
 .tog.off{background:var(--br);box-shadow:none;}
 .tog::after{content:'';position:absolute;width:19px;height:19px;background:#fff;border-radius:50%;top:3px;right:3px;transition:transform .22s;box-shadow:0 1px 4px rgba(0,0,0,.3);}
 .tog:not(.off)::after{transform:translateX(-19px);}
 .tog-label{display:flex;flex-direction:column;gap:2px;}
 .tog-title{font-size:12px;font-weight:700;color:var(--tx);}
 .tog-desc{font-size:10px;color:var(--mu3);}
-.infob{margin:0 14px 10px;background:rgba(34,197,94,.08);border:1px solid rgba(34,197,94,.15);border-radius:12px;padding:11px 14px;font-size:11px;color:#86efac;line-height:2;}
-.stb{margin:4px 14px 14px;background:linear-gradient(135deg,var(--g),var(--g2));color:var(--bg);border:none;border-radius:15px;padding:16px;font-size:15px;font-weight:900;font-family:'Roboto',sans-serif;cursor:pointer;width:calc(100% - 28px);transition:all .2s;box-shadow:0 4px 20px rgba(34,197,94,.25);}
+.infob{margin:0 14px 10px;background:rgba(64,128,255,.06);border:1px solid rgba(64,128,255,.12);border-radius:12px;padding:11px 14px;font-size:11px;color:#80a8ff;line-height:2;}
+.stb{margin:4px 14px 14px;background:linear-gradient(135deg,var(--g),var(--g2));color:var(--bg);border:none;border-radius:15px;padding:16px;font-size:15px;font-weight:900;font-family:'Roboto',sans-serif;cursor:pointer;width:calc(100% - 28px);transition:all .2s;box-shadow:0 4px 20px rgba(0,229,160,.25);}
 .stb:active{transform:scale(.98);}
 .stb.stop{background:linear-gradient(135deg,var(--r),var(--r2));box-shadow:0 4px 20px rgba(255,64,96,.25);color:#fff;}
-.ov{display:none;position:fixed;inset:0;background:rgba(5,18,12,.96);z-index:200;justify-content:center;align-items:center;flex-direction:column;gap:14px;backdrop-filter:blur(12px);}
+.ov{display:none;position:fixed;inset:0;background:rgba(5,8,16,.96);z-index:200;justify-content:center;align-items:center;flex-direction:column;gap:14px;backdrop-filter:blur(12px);}
 .ov.on{display:flex;}
 .lvc{background:var(--card);border:1px solid var(--br);border-radius:24px;padding:24px 20px;width:calc(100% - 48px);max-width:340px;box-shadow:0 24px 60px rgba(0,0,0,.6);position:relative;overflow:hidden;}
-.lvc::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,var(--g2),var(--g),#4ade80);}
+.lvc::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,var(--purple),var(--g),var(--cyan));}
 .lvc-close{position:absolute;top:10px;left:10px;width:30px;height:30px;border-radius:10px;border:1px solid var(--br2);background:rgba(7,17,31,.78);color:var(--tx);font-size:16px;font-weight:900;cursor:pointer;display:flex;align-items:center;justify-content:center;z-index:2;}
 .lvc-close:active{transform:scale(.96);}
 .lp{font-size:20px;font-weight:900;text-align:center;color:var(--tx);}
 .lsub{font-size:10px;color:var(--mu3);text-align:center;margin:3px 0 12px;letter-spacing:1px;text-transform:uppercase;}
 .ld{text-align:center;font-size:48px;font-weight:900;margin:8px 0;}
-.ld.up{color:var(--tx)!important;text-shadow:0 0 30px rgba(34,197,94,.22);}
+.ld.up{color:var(--tx)!important;text-shadow:0 0 30px rgba(0,229,160,.22);}
 .ld.dn{color:var(--r);text-shadow:0 0 30px rgba(255,64,96,.4);}
 .lm{display:flex;justify-content:space-around;margin-top:14px;padding-top:14px;border-top:1px solid var(--br);}
 .lmi{text-align:center;}
@@ -194,31 +217,115 @@ body{font-family:'Roboto',sans-serif;font-size:16px;font-weight:700;background:v
   font-size:13px;
   font-weight:900;
   cursor:pointer;
-  background:rgba(34,197,94,.08);
-  border:1px solid rgba(34,197,94,.22);
+  background:rgba(77,183,255,.08);
+  border:1px solid rgba(77,183,255,.22);
   color:var(--tx);
   transition:all .2s;
 }
 .langBtn.sel{
-  background:linear-gradient(135deg,#22c55e,#15803d);
-  border-color:rgba(22,163,74,.75);
+  background:linear-gradient(135deg,#4db7ff,#2979ff);
+  border-color:rgba(41,121,255,.75);
   color:#fff;
-  box-shadow:0 10px 25px rgba(22,163,74,.25);
+  box-shadow:0 10px 25px rgba(41,121,255,.22);
 }
 .langBtn:active{transform:scale(.98);}
+html[dir="ltr"] .hdr-r{text-align:left;}
+html[dir="ltr"] .fg input[type=text]{direction:ltr;text-align:left;}
+html[dir="ltr"] .oi,
+html[dir="ltr"] .sup-item,
+html[dir="ltr"] .mtt,
+html[dir="ltr"] .lml,
+html[dir="ltr"] .lsub{text-align:left;}
+html[dir="ltr"] .lvc-close{left:auto;right:10px;}
 .stc{background:var(--card);border:1px solid var(--br);border-radius:15px;padding:15px;position:relative;overflow:hidden;}
 .stc::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;}
 .stc:nth-child(1)::before{background:linear-gradient(90deg,var(--purple),var(--bl));}
 .stc:nth-child(2)::before{background:linear-gradient(90deg,var(--g),var(--cyan));}
 .stc:nth-child(3)::before{background:linear-gradient(90deg,var(--g),var(--g2));}
 .stc:nth-child(4)::before{background:linear-gradient(90deg,var(--r),var(--r2));}
-.stl{font-size:13px;color:var(--mu3);margin-bottom:8px;letter-spacing:1.2px;font-weight:900;text-transform:uppercase;}
+.stl{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  margin-bottom:10px;
+  min-height:34px;
+}
+.stl-txt{
+  flex:1;
+  min-width:0;
+  font-size:11px;
+  line-height:1.35;
+  letter-spacing:1.1px;
+  font-weight:900;
+  text-transform:uppercase;
+  color:var(--mu3);
+}
+.stl-ic{
+  width:32px;
+  height:32px;
+  border-radius:10px;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  flex-shrink:0;
+  border:1px solid rgba(255,255,255,.09);
+  box-shadow:0 2px 12px rgba(0,0,0,.28),inset 0 1px 0 rgba(255,255,255,.05);
+  color:var(--tx);
+}
+.stl-ic svg{
+  width:17px;
+  height:17px;
+  stroke:currentColor;
+  fill:none;
+  stroke-width:1.85;
+  stroke-linecap:round;
+  stroke-linejoin:round;
+  vector-effect:non-scaling-stroke;
+}
+.stl-ic--bars{
+  background:linear-gradient(155deg,rgba(77,183,255,.26),rgba(41,121,255,.09));
+  border-color:rgba(103,168,255,.35);
+  color:#7ec8ff;
+  box-shadow:0 0 16px rgba(77,183,255,.12),0 2px 12px rgba(0,0,0,.25),inset 0 1px 0 rgba(255,255,255,.06);
+}
+.stl-ic--pie{
+  background:linear-gradient(155deg,rgba(0,212,255,.22),rgba(0,212,255,.06));
+  border-color:rgba(0,212,255,.32);
+  color:var(--cyan);
+  box-shadow:0 0 18px rgba(0,212,255,.14),0 2px 12px rgba(0,0,0,.25),inset 0 1px 0 rgba(255,255,255,.06);
+}
+.stl-ic--win{
+  background:linear-gradient(155deg,rgba(0,229,160,.22),rgba(0,192,128,.08));
+  border-color:rgba(0,229,160,.32);
+  color:var(--g);
+  box-shadow:0 0 16px rgba(0,229,160,.12),0 2px 12px rgba(0,0,0,.25),inset 0 1px 0 rgba(255,255,255,.06);
+}
+.stl-ic--loss{
+  background:linear-gradient(155deg,rgba(255,64,96,.2),rgba(204,32,64,.08));
+  border-color:rgba(255,64,96,.32);
+  color:#ff6b84;
+  box-shadow:0 0 16px rgba(255,64,96,.12),0 2px 12px rgba(0,0,0,.25),inset 0 1px 0 rgba(255,255,255,.05);
+}
+.stl-ic--pl{
+  background:linear-gradient(155deg,rgba(224,184,64,.2),rgba(0,200,180,.1));
+  border-color:rgba(224,184,64,.28);
+  color:#5ee6cf;
+  box-shadow:0 0 18px rgba(224,184,64,.1),0 2px 12px rgba(0,0,0,.25),inset 0 1px 0 rgba(255,255,255,.05);
+}
+.pbar-lbl-row{
+  display:flex;
+  align-items:center;
+  gap:9px;
+  min-width:0;
+  flex:1;
+}
+.pbar-lbl-row .pbar-label{flex:1;min-width:0;line-height:1.35;}
 .stv{font-size:26px;font-weight:900;}
 .stv.g{color:var(--tx)!important;}
 .stv.r{color:var(--r);}
 .stv.b{color:var(--bl);}
 .pbar-wrap{margin:0 14px 10px;background:var(--card);border:1px solid var(--br);border-radius:14px;padding:14px;}
-.pbar-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;}
+.pbar-top{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:10px;}
 .pbar-label{font-size:13px;color:var(--mu3);font-weight:900;}
 .pbar-val{font-size:15px;font-weight:900;}
 .pbar-val.g{color:var(--tx)!important;}
@@ -233,13 +340,13 @@ body{font-family:'Roboto',sans-serif;font-size:16px;font-weight:700;background:v
 .tlp{font-size:12px;font-weight:700;color:var(--tx);}
 .tlt{font-size:10px;color:var(--mu3);margin-top:2px;}
 .tld{font-size:10px;padding:3px 10px;border-radius:20px;font-weight:700;}
-.tld.up{background:rgba(34,197,94,.1);color:var(--g);border:1px solid rgba(34,197,94,.2);}
+.tld.up{background:rgba(0,229,160,.1);color:var(--g);border:1px solid rgba(0,229,160,.2);}
 .tld.dn{background:rgba(255,64,96,.1);color:var(--r);border:1px solid rgba(255,64,96,.2);}
 .tlr{font-size:14px;font-weight:900;}
 .tlr.w{color:var(--g);}
 .tlr.l{color:var(--r);}
 .nt{padding:32px;text-align:center;color:var(--mu2);font-size:12px;line-height:2.2;}
-.mbg{display:none;position:fixed;inset:0;background:rgba(5,18,12,.88);z-index:150;justify-content:flex-end;align-items:flex-end;backdrop-filter:blur(6px);}
+.mbg{display:none;position:fixed;inset:0;background:rgba(5,8,16,.88);z-index:150;justify-content:flex-end;align-items:flex-end;backdrop-filter:blur(6px);}
 .mbg.on{display:flex;}
 .msh{background:var(--card2);border-radius:22px 22px 0 0;padding:20px 18px;width:100%;border-top:1px solid var(--br);max-height:65vh;overflow-y:auto;}
 .msh::before{content:'';display:block;width:36px;height:4px;background:var(--br2);border-radius:2px;margin:0 auto 16px;}
@@ -250,7 +357,16 @@ body{font-family:'Roboto',sans-serif;font-size:16px;font-weight:700;background:v
 .oi .sub{font-size:10px;color:var(--mu3);margin-top:3px;font-weight:400;}
 .oi-row{display:flex;align-items:center;justify-content:space-between;gap:10px;}
 .oi-main{display:flex;align-items:center;gap:8px;min-width:0;}
-.oi-flag{width:16px;height:12px;border-radius:2px;object-fit:cover;border:1px solid rgba(255,255,255,.14);display:block;}
+.oi-flag{width:18px;height:18px;border-radius:50%;object-fit:cover;border:1px solid rgba(255,255,255,.2);display:block;box-shadow:0 0 0 1px rgba(0,0,0,.2) inset;}
+.oi-gen,.vaf-gen{display:inline-flex;align-items:center;justify-content:center;min-width:18px;width:18px;height:18px;padding:0;border-radius:50%;background:linear-gradient(145deg,#3d4f6b,#283548);color:#d0dce8;font-size:6px;font-weight:900;line-height:1;border:1px solid rgba(255,255,255,.16);box-sizing:border-box;}
+.vaf-gen{min-width:15px;width:15px;height:15px;font-size:5px;}
+.oi-gen.oi-metal,.vaf-gen.oi-metal{background:linear-gradient(145deg,#c9a227,#7a5c1a);color:#fff;border-color:rgba(255,220,120,.25);}
+.oi-ic{display:inline-flex;align-items:center;gap:2px;flex-shrink:0;}
+.vAsset-bar{min-width:0;flex:1;display:flex;flex-wrap:wrap;align-items:center;gap:4px 5px;font-size:11px;font-weight:800;line-height:1.25;color:var(--tx);}
+.vaf-chip{display:inline-flex;align-items:center;gap:3px;min-width:0;max-width:100%;}
+.vaf-f{width:15px;height:15px;border-radius:50%;object-fit:cover;border:1px solid rgba(255,255,255,.2);box-shadow:0 0 0 1px rgba(0,0,0,.2) inset;}
+.vaf-sep{color:var(--mu3);font-weight:800;padding:0 1px;flex-shrink:0;}
+.vaf-txt{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:7.5rem;}
 .oi-name{font-size:13px;font-weight:700;color:var(--tx);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .oi-rate{font-size:11px;color:var(--or);font-weight:900;}
 .oi-check{font-size:14px;color:transparent;font-weight:900;min-width:16px;text-align:left;}
@@ -258,7 +374,7 @@ body{font-family:'Roboto',sans-serif;font-size:16px;font-weight:700;background:v
 .mc{margin-top:10px;text-align:center;padding:12px;color:var(--mu3);cursor:pointer;font-size:12px;}
 .toast{position:fixed;bottom:88px;left:50%;transform:translateX(-50%) translateY(14px);background:var(--card2);border:1px solid var(--br2);border-radius:13px;padding:11px 20px;font-size:12px;font-weight:700;z-index:300;opacity:0;transition:all .25s;white-space:nowrap;max-width:90%;backdrop-filter:blur(12px);box-shadow:0 8px 24px rgba(0,0,0,.4);}
 .toast.on{opacity:1;transform:translateX(-50%) translateY(0);}
-.toast.ok{border-color:rgba(34,197,94,.4);color:var(--tx);}
+.toast.ok{border-color:rgba(0,229,160,.4);color:var(--tx);}
 .toast.er{border-color:rgba(255,64,96,.4);color:var(--r);}
 .toast.wa{border-color:rgba(255,176,32,.4);color:var(--or);}
 .trade-pop{
@@ -266,7 +382,7 @@ body{font-family:'Roboto',sans-serif;font-size:16px;font-weight:700;background:v
   inset:auto 50% 50% auto;
   transform:translate(50%,50%) scale(.96);
   background:var(--card2);
-  border:2px solid rgba(34,197,94,.45);
+  border:2px solid rgba(77,183,255,.45);
   color:var(--tx);
   border-radius:16px;
   padding:14px 18px;
@@ -282,90 +398,161 @@ body{font-family:'Roboto',sans-serif;font-size:16px;font-weight:700;background:v
 }
 .trade-pop.on{opacity:1;transform:translate(50%,50%) scale(1);}
 .sn{background:rgba(255,176,32,.06);border:1px solid rgba(255,176,32,.15);border-radius:11px;padding:10px 13px;font-size:11px;color:var(--or);line-height:1.8;text-align:center;margin:0 14px 10px;}
-.sup-item{background:var(--card);border:1px solid var(--br);border-radius:13px;padding:14px 16px;font-size:14px;color:var(--tx);cursor:pointer;transition:all .2s;display:flex;align-items:center;gap:10px;font-weight:900;}
+.sup-item{
+  background:var(--card);
+  border:1px solid var(--br);
+  border-radius:14px;
+  padding:14px 16px;
+  font-size:14px;
+  color:var(--tx);
+  cursor:pointer;
+  transition:background .2s, border-color .2s, box-shadow .2s;
+  display:flex;
+  align-items:center;
+  gap:12px;
+  font-weight:900;
+  text-align:right;
+}
 .sup-item:active{background:var(--g3);}
-.sup-icon{font-size:18px;flex-shrink:0;}
+.sup-lbl{flex:1;min-width:0;line-height:1.45;}
+.sup-icon{
+  width:38px;
+  height:38px;
+  border-radius:12px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  flex-shrink:0;
+  border:1px solid rgba(255,255,255,.1);
+  box-shadow:
+    0 2px 14px rgba(0,0,0,.28),
+    0 0 22px rgba(77,183,255,.07),
+    inset 0 1px 0 rgba(255,255,255,.06);
+  color:var(--cyan);
+}
+.sup-icon svg{
+  width:19px;
+  height:19px;
+  stroke:currentColor;
+  fill:none;
+  stroke-width:1.85;
+  stroke-linecap:round;
+  stroke-linejoin:round;
+  vector-effect:non-scaling-stroke;
+}
+.sup-icon--start{
+  background:linear-gradient(155deg,rgba(77,183,255,.24),rgba(0,212,255,.1));
+  border-color:rgba(103,168,255,.32);
+  color:#7ec8ff;
+  box-shadow:0 2px 14px rgba(0,0,0,.28),0 0 24px rgba(77,183,255,.12),inset 0 1px 0 rgba(255,255,255,.06);
+}
+.sup-icon--wallet{
+  background:linear-gradient(155deg,rgba(224,184,64,.2),rgba(255,176,32,.08));
+  border-color:rgba(224,184,64,.3);
+  color:var(--gold);
+  box-shadow:0 2px 14px rgba(0,0,0,.28),0 0 22px rgba(224,184,64,.1),inset 0 1px 0 rgba(255,255,255,.05);
+}
+.sup-icon--target{
+  background:linear-gradient(155deg,rgba(0,229,160,.2),rgba(0,192,128,.08));
+  border-color:rgba(0,229,160,.28);
+  color:var(--g);
+  box-shadow:0 2px 14px rgba(0,0,0,.28),0 0 22px rgba(0,229,160,.1),inset 0 1px 0 rgba(255,255,255,.06);
+}
+.sup-icon--layers{
+  background:linear-gradient(155deg,rgba(128,96,255,.22),rgba(77,183,255,.1));
+  border-color:rgba(128,96,255,.3);
+  color:#a89cff;
+  box-shadow:0 2px 14px rgba(0,0,0,.28),0 0 22px rgba(128,96,255,.12),inset 0 1px 0 rgba(255,255,255,.05);
+}
+.sup-list{
+  margin:0 14px;
+  display:flex;
+  flex-direction:column;
+  gap:10px;
+}
+.sup-list .sup-item{margin-left:0;margin-right:0;}
 </style>
 
 <style>
 :root{
-  --bg:#051a10;
-  --bg2:#0a2418;
-  --card:#0c2218;
-  --card2:#0f2a1c;
-  --br:#1a3d2e;
-  --br2:#2a5240;
-  --g:#22c55e;
-  --g2:#16a34a;
-  --g3:rgba(34,197,94,.1);
+  --bg:#07111f;
+  --bg2:#0b1728;
+  --card:#101c2f;
+  --card2:#152238;
+  --br:#22314d;
+  --br2:#30415f;
+  --g:#22c58b;
+  --g2:#149d6d;
+  --g3:rgba(34,197,139,.08);
   --r:#ef5b6c;
   --r2:#c74054;
   --or:#f0b44c;
-  --gold:#86efac;
-  --gold2:#bbf7d0;
-  --tx:#ecfdf5;
-  --tx2:#c4e8d4;
-  --mu:#4a6b58;
-  --mu2:#6a8f78;
-  --mu3:#8aaf98;
-  --cyan:#4ade80;
-  --purple:#15803d;
-  --bl:#22c55e;
-  --shadow:0 14px 34px rgba(5,30,18,.32);
-  --shadow-lg:0 24px 56px rgba(5,30,18,.42);
+  --gold:#d8b15b;
+  --gold2:#f3dfae;
+  --tx:#f4f7fb;
+  --tx2:#c7d4ea;
+  --mu:#5b6d88;
+  --mu2:#8496b0;
+  --mu3:#9fb0c8;
+  --cyan:#4db7ff;
+  --purple:#7b88ff;
+  --bl:#67a8ff;
+  --shadow:0 14px 34px rgba(3,10,24,.28);
+  --shadow-lg:0 24px 56px rgba(3,10,24,.38);
 }
 body{
   background:
-    radial-gradient(circle at top right, rgba(34,197,94,.1), transparent 28%),
-    radial-gradient(circle at top left, rgba(22,163,74,.08), transparent 26%),
-    linear-gradient(180deg,#051a10 0%,#071f14 100%);
+    radial-gradient(circle at top right, rgba(77,183,255,.08), transparent 26%),
+    radial-gradient(circle at top left, rgba(34,197,139,.08), transparent 24%),
+    linear-gradient(180deg,#07111f 0%,#0a1422 100%);
   color:var(--tx);
 }
 .app{max-width:442px;}
 .bg-fx{opacity:.65;}
 .bg-fx::before{background:radial-gradient(circle,rgba(34,197,139,.09) 0%,transparent 68%);}
-.bg-fx::after{background:radial-gradient(circle,rgba(34,197,94,.08) 0%,transparent 68%);}
+.bg-fx::after{background:radial-gradient(circle,rgba(77,183,255,.08) 0%,transparent 68%);}
 .hdr,.nav,.lbox,.balcard,.mni,.ao,.sc,.irow,.rc,.stc,.pbar-wrap,.tlog,.msh,.lvc,.toast,.sup-item,.infob,.sn{box-shadow:var(--shadow);}
-.hdr{background:rgba(6,22,14,.92);border-bottom:1px solid rgba(34,197,94,.12);padding:14px 18px;}
+.hdr{background:rgba(7,17,31,.88);border-bottom:1px solid rgba(159,176,200,.12);padding:14px 18px;}
 .logo-top,.acc-badge,.sl,.lsub,.stl,.pbar-label,.bl,.at,.fg label,.slb,.lml{color:var(--mu3);}
 .logo-main{font-size:18px;letter-spacing:-.2px;}
-.logo-main span{color:var(--g);}
+.logo-main span{color:var(--cyan);}
 .hdr-id{color:var(--tx);}
 .hdr-em{color:var(--mu2);}
-.nav{background:rgba(6,22,14,.96);border-top:1px solid rgba(34,197,94,.1);padding-top:3px;}
+.nav{background:rgba(7,17,31,.94);border-top:1px solid rgba(159,176,200,.1);padding-top:3px;}
 .ni{padding:11px 0 10px;color:var(--mu2);font-size:12px;font-weight:900;gap:5px;}
-.ni.on{color:var(--tx);}
-.ni.on::before{height:3px;background:linear-gradient(90deg,transparent,var(--g),transparent);}
+.ni.on{color:var(--cyan);text-shadow:0 0 16px rgba(77,183,255,.45);}
+.ni.on::before{height:3px;background:linear-gradient(90deg,transparent,var(--cyan),transparent);box-shadow:0 0 12px rgba(77,183,255,.6);}
+.ni.on svg{filter:drop-shadow(0 0 5px rgba(77,183,255,.95)) drop-shadow(0 0 14px rgba(77,183,255,.5));}
 .hero{margin-bottom:28px;}
-.hero-badge{background:rgba(34,197,94,.1);border:1px solid rgba(34,197,94,.25);color:var(--g);letter-spacing:1.2px;padding:7px 16px;}
-.hero-icon{width:74px;height:74px;margin:0 auto 14px;border-radius:20px;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,rgba(34,197,94,.22),rgba(22,163,74,.14));border:1px solid rgba(34,197,94,.2);color:var(--tx);font-size:22px;font-weight:900;letter-spacing:1px;filter:none;box-shadow:var(--shadow);}
+.hero-badge{background:rgba(77,183,255,.08);border:1px solid rgba(77,183,255,.22);color:var(--cyan);letter-spacing:1.2px;padding:7px 16px;}
+.hero-icon{width:88px;height:88px;margin:0 auto 14px;border-radius:22px;display:flex;align-items:center;justify-content:center;background:transparent;border:none;color:var(--tx);font-size:22px;font-weight:900;letter-spacing:1px;filter:none;box-shadow:none;}
 .hero-title{font-size:30px;}
-.hero-title em{color:var(--g);}
+.hero-title em{color:var(--cyan);}
 .hero-sub{color:var(--mu2);font-size:13px;max-width:320px;margin:8px auto 0;}
 .lbox,.balcard,.mni,.ao,.sc,.irow,.rc,.stc,.pbar-wrap,.tlog,.msh,.lvc,.sup-item{background:linear-gradient(180deg,rgba(16,28,47,.96),rgba(13,24,40,.96));border:1px solid rgba(159,176,200,.11);}
 .lbox{border-radius:24px;padding:24px 20px;}.lbox h2{font-size:20px;}.lbox .sub{color:var(--mu2);font-size:14px;margin-bottom:20px;}
 .fg{margin-bottom:15px;}
 .fg input,.iinput{background:rgba(7,17,31,.78);border:1.5px solid rgba(159,176,200,.14);border-radius:14px;min-height:48px;}
-.fg input:focus,.iinput:focus{border-color:rgba(34,197,94,.55);box-shadow:0 0 0 4px rgba(34,197,94,.1);}
-.pbtn,.stb{border-radius:15px;min-height:50px;background:linear-gradient(135deg,#22c55e,#15803d);color:#fff;box-shadow:0 12px 28px rgba(22,163,74,.28);}
+.fg input:focus,.iinput:focus{border-color:rgba(77,183,255,.55);box-shadow:0 0 0 4px rgba(77,183,255,.08);}
+.pbtn,.stb{border-radius:15px;min-height:50px;background:linear-gradient(135deg,#4db7ff,#2979ff);color:#fff;box-shadow:0 12px 28px rgba(41,121,255,.22);}
 .stb.stop{background:linear-gradient(135deg,#ef5b6c,#cb4459);color:#fff;box-shadow:0 12px 28px rgba(203,68,89,.2);}
-.lnk{color:var(--g);opacity:.88;}
-.elite-banner{background:linear-gradient(135deg,rgba(34,197,94,.14),rgba(22,163,74,.08));border:1px solid rgba(34,197,94,.22);border-radius:18px;margin-bottom:20px;}
-.elite-text{color:var(--gold);font-size:18px;}.elite-sub{color:var(--mu2);opacity:1;}
-.acc-hero{background:linear-gradient(160deg,rgba(12,32,22,.98) 0%,rgba(8,26,18,.98) 100%);border-bottom:1px solid rgba(34,197,94,.1);padding:22px 16px 18px;}
+.lnk{color:var(--cyan);opacity:.88;}
+.elite-banner{background:linear-gradient(135deg,rgba(216,177,91,.12),rgba(77,183,255,.08));border:1px solid rgba(216,177,91,.18);border-radius:18px;margin-bottom:20px;}
+.elite-text{color:var(--tx);font-size:18px;}.elite-sub{color:var(--mu2);opacity:1;}
+.acc-hero{background:linear-gradient(160deg,rgba(21,34,56,.98) 0%,rgba(15,27,45,.98) 100%);border-bottom:1px solid rgba(159,176,200,.08);padding:22px 16px 18px;}
 .acc-conn{background:rgba(34,197,139,.08);color:var(--tx);border-color:rgba(34,197,139,.16);}
 .balrow,.agrd,.sgrd{gap:12px;margin-left:16px;margin-right:16px;}
 .balcard,.stc{border-radius:18px;padding:16px;}
 .ba{font-size:23px;}.bu{color:var(--tx);font-weight:900;}
 .mni,.sr,.iitem,.pbar-wrap,.tlh,.tli,.sup-item{margin-left:16px;margin-right:16px;}
 .mni,.sr{border-radius:16px;padding:15px 16px;}
-.mic{background:rgba(34,197,94,.09);color:var(--g);border:1px solid rgba(34,197,94,.12);}
-.ao.sel{border-color:rgba(34,197,94,.45);background:rgba(34,197,94,.06);box-shadow:0 0 0 4px rgba(34,197,94,.06);}
+.mic{background:rgba(77,183,255,.09);color:var(--cyan);border:1px solid rgba(77,183,255,.12);}
+.ao.sel{border-color:rgba(77,183,255,.45);background:rgba(77,183,255,.06);box-shadow:0 0 0 4px rgba(77,183,255,.06);}
 .ar{border-color:rgba(159,176,200,.28);}
 .sc,.irow,.rc,.pbar-wrap,.tlog{border-radius:18px;overflow:hidden;}
 .iitem{padding:14px 16px;}.rc{padding:16px;margin-left:16px;margin-right:16px;}
-.tog{background:var(--g);box-shadow:0 8px 18px rgba(34,197,94,.22);}.tog.off{background:#2a3d32;}
-.infob,.sn{border-radius:14px;font-size:11.5px;line-height:2;color:var(--tx2);background:rgba(34,197,94,.06);border:1px solid rgba(34,197,94,.12);}
+.tog{background:var(--cyan);box-shadow:0 8px 18px rgba(77,183,255,.2);}.tog.off{background:#31415d;}
+.infob,.sn{border-radius:14px;font-size:11.5px;line-height:2;color:var(--tx2);background:rgba(77,183,255,.06);border:1px solid rgba(77,183,255,.12);}
 .sn{color:var(--or);background:rgba(240,180,76,.08);border-color:rgba(240,180,76,.16);}
 .stc::before{height:3px;}
 .stc:nth-child(1)::before{background:linear-gradient(90deg,var(--purple),var(--bl));}
@@ -373,6 +560,9 @@ body{
 .stc:nth-child(3)::before{background:linear-gradient(90deg,var(--cyan),var(--g));}
 .stc:nth-child(4)::before{background:linear-gradient(90deg,var(--r),var(--r2));}
 .stv{font-size:28px;}
+.stl-txt{font-size:12px;letter-spacing:1.2px;}
+.stl-ic{width:34px;height:34px;border-radius:11px;}
+.stl-ic svg{width:18px;height:18px;}
 .pbar{height:9px;background:#22314a;}
 .tlh{padding:15px 16px;}.tli{padding:13px 16px;}.tli:hover{background:rgba(255,255,255,.02);}
 .tld.up{background:rgba(34,197,139,.1);border-color:rgba(34,197,139,.18);}.tld.dn{background:rgba(239,91,108,.1);border-color:rgba(239,91,108,.18);}
@@ -383,15 +573,25 @@ body{
 .toast{background:rgba(16,28,47,.96);border-radius:14px;padding:12px 18px;box-shadow:var(--shadow-lg);}
 .lvc{border-radius:26px;padding:26px 22px;}.lsub{letter-spacing:1.4px;}
 .sob{border-radius:14px;padding:14px 28px;background:rgba(239,91,108,.08);border-color:rgba(239,91,108,.2);}
-.sup-item{padding:15px 16px;border-radius:16px;gap:12px;}
-.sup-icon{width:28px;height:28px;display:flex;align-items:center;justify-content:center;background:rgba(34,197,94,.08);border-radius:10px;color:var(--g);font-size:14px;}
+.sup-item{padding:15px 17px;border-radius:16px;gap:13px;}
+.sup-icon{width:40px;height:40px;border-radius:13px;}
+.sup-icon svg{width:20px;height:20px;}
 #sAcc .mni,#sBot .sc,#sBot .irow,#sBot .rc,#sSt .pbar-wrap,#sSt .tlog,#sSup .sup-item{margin-bottom:12px;}
+.ringWinWrap{display:flex;flex-direction:column;align-items:center;gap:6px;}
+.ringValAbove{
+  position:relative;
+  z-index:2;
+  font-size:22px;
+  font-weight:900;
+  color:var(--tx);
+  line-height:1.1;
+}
 .ring{
   --p:0;
   width:66px;
   height:66px;
   border-radius:50%;
-  margin:10px auto 0;
+  margin:0 auto;
   display:flex;
   align-items:center;
   justify-content:center;
@@ -405,6 +605,7 @@ body{
   border-radius:50%;
   background:rgba(7,17,31,.8);
   border:1px solid rgba(159,176,200,.14);
+  z-index:0;
 }
 .ringVal{
   position:relative;
@@ -413,11 +614,6 @@ body{
   color:var(--tx);
 }
 .g{color:var(--tx)!important;}
-.stl svg{
-  vertical-align:-3px;
-  margin-left:6px;
-  opacity:.95;
-}
 h2{font-size:18px;}
 h1{font-size:18px;}
 @media (max-width:420px){.scr{padding-bottom:82px;}.hero-title{font-size:27px;}.ba{font-size:21px;}}
@@ -433,8 +629,8 @@ h1{font-size:18px;}
   <div id="regBdg" style="text-align:center;padding-top:16px"></div>
   <div class="hero">
     <div class="hero-badge">منصة تداول احترافية</div>
-    <div class="hero-icon">AT</div>
-    <div class="hero-title">فريق عبود تريدر<br><em>Abood Trader</em></div>
+    <div class="hero-icon"><img class="hero-logo-img" src="/pwa/icon-512.png?v=3" alt="NEXO TRADE"></div>
+    <div class="hero-title">نيكسو تريد<br><em>NEXO TRADE</em></div>
     <div class="hero-sub">بوت التداول الآلي الذكي على منصة Quotex</div>
   </div>
   <div class="lbox" id="regBox">
@@ -457,8 +653,8 @@ h1{font-size:18px;}
 <!-- ══ LOGIN ══ -->
 <div id="sLogin" class="scr" style="position:relative;z-index:1;justify-content:center;align-items:center;padding:20px 18px;min-height:100dvh;">
   <div class="elite-banner">
-    <div class="elite-text">فريق عبود تريدر</div>
-    <div class="elite-sub">Abood Trader — بوت التداول الذكي</div>
+    <div class="elite-text">نيكسو تريد</div>
+    <div class="elite-sub">NEXO TRADE — بوت التداول الذكي</div>
   </div>
   <div id="loginBdg" style="text-align:center;margin-bottom:14px"></div>
   <div class="lbox" id="loginBox">
@@ -470,7 +666,7 @@ h1{font-size:18px;}
     <p class="lnk" onclick="doLogout()">← تسجيل خروج / تغيير الحساب</p>
   </div>
   <div class="lbox" id="pinBox" style="display:none;margin-top:12px">
-    <div class="pinbox"><div class="icon">AT</div><h2>رمز التحقق</h2><p class="sub">أرسل Quotex رمزاً إلى<br><span id="pinEmail" style="color:var(--g);font-weight:700"></span></p></div>
+    <div class="pinbox"><div class="icon"><img class="pin-logo-img" src="/pwa/icon-512.png?v=3" alt="NEXO TRADE"></div><h2>رمز التحقق</h2><p class="sub">أرسل Quotex رمزاً إلى<br><span id="pinEmail" style="color:var(--g);font-weight:700"></span></p></div>
     <div class="fg"><label>رمز PIN</label><input type="text" id="iPin" inputmode="numeric" pattern="[0-9]*" autocomplete="one-time-code" placeholder="123456" style="text-align:center;font-size:26px;font-weight:900;letter-spacing:10px"></div>
     <button class="pbtn" id="pinBtn" onclick="doPin()">تأكيد الرمز</button>
     <p class="lnk" onclick="backLogin()">← العودة</p>
@@ -480,12 +676,16 @@ h1{font-size:18px;}
 <!-- ══ ACCOUNT ══ -->
 <div id="sAcc" class="scr">
   <div class="hdr">
-    <div class="logo-wrap"><div class="logo-top">فريق عبود تريدر</div><div class="logo-main">Abood <span>Trader</span></div></div>
+    <div class="logo-wrap"><div class="logo-top">نيكسو تريد</div><div class="logo-main">NEXO <span>TRADE</span></div></div>
     <div class="hdr-r"><div class="hdr-id" id="hId">#00000000</div><div class="hdr-em" id="hEm">email</div></div>
+  </div>
+  <div class="langRow">
+    <button class="langBtn" data-lang="ar" type="button" onclick="setLang('ar')">العربية</button>
+    <button class="langBtn" data-lang="en" type="button" onclick="setLang('en')">English</button>
   </div>
   <div id="simA"></div>
   <div class="acc-hero">
-    <div class="acc-badge">فريق عبود تريدر</div>
+    <div class="acc-badge">نيكسو تريد</div>
     <div class="acc-name" id="dEm">مرحباً</div>
     <div class="acc-conn"><span class="dot"></span>متصل بـ Quotex</div>
   </div>
@@ -511,18 +711,18 @@ h1{font-size:18px;}
 <!-- ══ BOT ══ -->
 <div id="sBot" class="scr">
   <div class="hdr">
-    <div class="logo-wrap"><div class="logo-top">فريق عبود تريدر</div><div class="logo-main">Abood <span>Trader</span></div></div>
+    <div class="logo-wrap"><div class="logo-top">نيكسو تريد</div><div class="logo-main">NEXO <span>TRADE</span></div></div>
     <div id="simB"></div>
   </div>
   <div class="sl">اختيار الحساب</div>
   <div class="agrd">
-    <div class="ao" id="bReal" onclick="selAcc('real')"><div class="at">REAL</div><div class="ab" id="rBalB">0.00</div><div class="ar">ID</div></div>
-    <div class="ao sel" id="bDemo" onclick="selAcc('demo')"><div class="at">DEMO</div><div class="ab" id="dBalB">0.00</div><div class="ar">ID</div></div>
+    <div class="ao" id="bReal" onclick="selAcc('real')"><div class="at">REAL</div><div class="ab" id="rBalB">0.00</div></div>
+    <div class="ao sel" id="bDemo" onclick="selAcc('demo')"><div class="at">DEMO</div><div class="ab" id="dBalB">0.00</div></div>
   </div>
   <div class="sl">الإعدادات</div>
   <div class="sc">
-    <div class="sr" onclick="om('assets')"><div class="sv"><span id="vAsset" style="font-size:11px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">EURUSD OTC</span><span class="ch">‹</span></div><div class="slb">الأزواج المختارة</div></div>
-    <div class="sr" onclick="om('strategy')"><div class="sv"><span id="vStrat">عبود</span><span class="ch">‹</span></div><div class="slb">الاستراتيجية</div></div>
+    <div class="sr" onclick="om('assets')"><div class="sv"><span id="vAsset" class="vAsset-bar">EUR/USD (OTC)</span><span class="ch">‹</span></div><div class="slb">الأزواج المختارة</div></div>
+    <div class="sr" onclick="om('strategy')"><div class="sv"><span id="vStrat">PREMIUM</span><span class="ch">‹</span></div><div class="slb">الاستراتيجية</div></div>
   </div>
   <div class="sl">المبلغ والحدود</div>
   <div class="irow">
@@ -535,7 +735,7 @@ h1{font-size:18px;}
       <div class="tog-label"><div class="tog-title">هدف الربح</div><div class="tog-desc" id="plDesc">يوقف عند +50</div></div>
       <div class="tog" id="tP" onclick="tgP()"></div>
     </div>
-    <div class="togrow">
+    <div class="togrow" style="margin-bottom:12px">
       <div class="tog-label"><div class="tog-title">حد الخسارة</div><div class="tog-desc" id="slDesc">يوقف عند -30</div></div>
       <div class="tog" id="tS" onclick="tgS()"></div>
     </div>
@@ -553,56 +753,48 @@ h1{font-size:18px;}
 
 <!-- ══ STATS ══ -->
 <div id="sSt" class="scr">
-  <div class="hdr"><div class="logo-wrap"><div class="logo-top">فريق عبود تريدر</div><div class="logo-main" id="stTitle">الإحصائيات</div></div></div>
-  <div class="langRow">
-    <button class="langBtn sel" id="langAr" type="button" onclick="setLang('ar')">العربية</button>
-    <button class="langBtn" id="langEn" type="button" onclick="setLang('en')">English</button>
-  </div>
+  <div class="hdr"><div class="logo-wrap"><div class="logo-top">نيكسو تريد</div><div class="logo-main" id="stTitle">الإحصائيات</div></div></div>
   <div class="sgrd">
     <div class="stc">
       <div class="stl">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M12 1v22"></path>
-          <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7H14a3.5 3.5 0 0 1 0 7H7"></path>
-        </svg>
-        <span id="stTotLbl">إجمالي الصفقات</span>
+        <span class="stl-ic stl-ic--bars" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 18V9"/><path d="M9 18v-5"/><path d="M14 18V6"/><path d="M19 18v-9"/></svg></span>
+        <span class="stl-txt" id="stTotLbl">إجمالي الصفقات</span>
       </div>
       <div class="stv b" id="sTot">0</div>
     </div>
     <div class="stc">
       <div class="stl">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M12 20h9"></path>
-          <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"></path>
-        </svg>
-        <span id="stWinLbl">نسبة الفوز</span>
+        <span class="stl-ic stl-ic--pie" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M21.21 15.89A10 10 0 1 1 8 2.83"/><path d="M22 12A10 10 0 0 0 12 2v10z"/></svg></span>
+        <span class="stl-txt" id="stWinLbl">نسبة الفوز</span>
       </div>
-      <div class="ring" id="ringRat" style="--p:0">
-        <div class="ringVal stv g" id="sRat">0%</div>
+      <div class="ringWinWrap">
+        <div class="ringValAbove stv g" id="sRat">0%</div>
+        <div class="ring" id="ringRat" style="--p:0" aria-hidden="true"></div>
       </div>
     </div>
     <div class="stc">
       <div class="stl">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M20 6 9 17l-5-5"></path>
-        </svg>
-        <span id="stWinsLbl">الصفقات الرابحة</span>
+        <span class="stl-ic stl-ic--win" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></svg></span>
+        <span class="stl-txt" id="stWinsLbl">الصفقات الرابحة</span>
       </div>
       <div class="stv g" id="sWin">0</div>
     </div>
     <div class="stc">
       <div class="stl">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M18 6 6 18"></path>
-          <path d="M6 6l12 12"></path>
-        </svg>
-        <span id="stLossLbl">الصفقات الخاسرة</span>
+        <span class="stl-ic stl-ic--loss" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></svg></span>
+        <span class="stl-txt" id="stLossLbl">الصفقات الخاسرة</span>
       </div>
       <div class="stv r" id="sLos">0</div>
     </div>
   </div>
   <div class="pbar-wrap">
-    <div class="pbar-top"><span class="pbar-label" id="pbarLbl">ربح / خسارة الجلسة</span><span class="pbar-val" id="sPrf" style="color:var(--mu3)">0.00</span></div>
+    <div class="pbar-top">
+      <div class="pbar-lbl-row">
+        <span class="stl-ic stl-ic--pl" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></span>
+        <span class="pbar-label" id="pbarLbl">ربح / خسارة الجلسة</span>
+      </div>
+      <span class="pbar-val" id="sPrf" style="color:var(--mu3)">0.00</span>
+    </div>
     <div class="pbar"><div class="pbar-fill" id="sPrfBar" style="width:50%;background:var(--mu)"></div></div>
   </div>
   <!-- سجل الصفقات تم إزالته بناءً على طلبك -->
@@ -616,14 +808,25 @@ h1{font-size:18px;}
 
 <!-- ══ SUPPORT ══ -->
 <div id="sSup" class="scr">
-  <div class="hdr"><div class="logo-wrap"><div class="logo-top">فريق عبود تريدر</div><div class="logo-main">الدعم</div></div></div>
+  <div class="hdr"><div class="logo-wrap"><div class="logo-top">نيكسو تريد</div><div class="logo-main">الدعم</div></div></div>
   <div style="padding:18px 16px 12px"><div style="font-size:18px;font-weight:900;margin-bottom:4px">مركز المساعدة</div><div style="font-size:12px;color:var(--mu3)">الأسئلة الشائعة وإرشادات الاستخدام</div></div>
-  <div style="margin:0 14px;display:flex;flex-direction:column;gap:8px">
-    <div class="sup-item" onclick="openHelp('start')"><span class="sup-icon">🚀</span><span>كيف أبدأ التداول؟</span></div>
-    <div class="sup-item" onclick="openHelp('real_demo')"><span class="sup-icon">💰</span><span>ما الفرق بين الحساب الحقيقي والتجريبي؟</span></div>
-    <div class="sup-item" onclick="openHelp('profit_loss')"><span class="sup-icon">🎯</span><span>كيف أضبط هدف الربح وحد الخسارة؟</span></div>
-    <div class="sup-item" onclick="openHelp('best_strategy')"><span class="sup-icon">📊</span><span>ما الاستراتيجية الأفضل؟</span></div>
-    <div class="sup-item" onclick="openHelp('multi_assets')"><span class="sup-icon">🔗</span><span>كيف أختار أكثر من زوج؟</span></div>
+  <div class="sup-list">
+    <div class="sup-item" onclick="openHelp('start')">
+      <span class="sup-icon sup-icon--start" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/><path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"/><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/></svg></span>
+      <span class="sup-lbl">كيف أبدأ التداول؟</span>
+    </div>
+    <div class="sup-item" onclick="openHelp('real_demo')">
+      <span class="sup-icon sup-icon--wallet" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M19 7V4a1 1 0 0 0-1-1H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4h-3a2 2 0 0 0 0 4h3a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1"/><path d="M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-4"/></svg></span>
+      <span class="sup-lbl">ما الفرق بين الحساب الحقيقي والتجريبي؟</span>
+    </div>
+    <div class="sup-item" onclick="openHelp('profit_loss')">
+      <span class="sup-icon sup-icon--target" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg></span>
+      <span class="sup-lbl">كيف أضبط هدف الربح وحد الخسارة؟</span>
+    </div>
+    <div class="sup-item" onclick="openHelp('multi_assets')">
+      <span class="sup-icon sup-icon--layers" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z"/><path d="m22 17.65-9.17 4.16a2 2 0 0 1-1.66 0L2 17.65"/><path d="m22 12.65-9.17 4.16a2 2 0 0 1-1.66 0L2 12.65"/></svg></span>
+      <span class="sup-lbl">كيف أختار أكثر من زوج؟</span>
+    </div>
   </div>
   <div class="nav">
     <div class="ni" onclick="go('sAcc',0)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>الحساب</div>
@@ -638,12 +841,11 @@ h1{font-size:18px;}
   <div class="lvc">
     <button class="lvc-close" onclick="closeLiveByUser()" title="إغلاق">×</button>
     <div class="lp" id="lPair">EURUSD</div>
-    <div class="lsub" id="lStrat">عبود</div>
+    <div class="lsub" id="lStrat">PREMIUM</div>
     <div class="ld up" id="lDir">▲ شراء</div>
     <div class="lm">
       <div class="lmi"><div class="lml">المبلغ</div><div class="lmv" id="lAmt">10</div></div>
       <div class="lmi"><div class="lml">الوقت</div><div class="lmv" id="lTmr">60s</div></div>
-      <div class="lmi"><div class="lml">الحساب</div><div class="lmv" id="lAcc">تجريبي</div></div>
     </div>
     <div class="pb2"><div class="pf2 up" id="lProg" style="width:100%"></div></div>
   </div>
@@ -662,81 +864,328 @@ h1{font-size:18px;}
 <div class="trade-pop" id="tradePop"></div>
 
 <script>
-const s={email:'',uid:'',rBal:0,dBal:0,currency:'USD',token:'',acc:'demo',asset:'EURUSD_otc',assets:[],strategy:'HUSAAM',pOn:true,sOn:true,running:false,wins:0,losses:0,profit:0,pollInt:null,simT:null,sim:false,lastTradePopupId:null,hiddenLiveTradeId:null};
-const ASSETS_OTC=['EURUSD_otc','GBPUSD_otc','AUDUSD_otc','USDJPY_otc','EURJPY_otc','GBPJPY_otc','AUDCAD_otc','USDCAD_otc','EURGBP_otc','EURAUD_otc','GBPAUD_otc','NZDUSD_otc'];
-const ASSETS_LIVE=['EURUSD','GBPUSD','AUDUSD','USDJPY','EURJPY','GBPJPY','AUDCAD','USDCAD','EURGBP','EURAUD','GBPAUD','NZDUSD'];
-const ASSETS=[...ASSETS_OTC,...ASSETS_LIVE];
+const DEFAULT_ASSETS_OTC=['EURUSD_otc','GBPUSD_otc','AUDUSD_otc','USDJPY_otc','EURJPY_otc','GBPJPY_otc','AUDCAD_otc','USDCAD_otc','EURGBP_otc','EURAUD_otc','GBPAUD_otc','NZDUSD_otc'];
+const DEFAULT_ASSETS_LIVE=['EURUSD','GBPUSD','AUDUSD','USDJPY','EURJPY','GBPJPY','AUDCAD','USDCAD','EURGBP','EURAUD','GBPAUD','NZDUSD'];
+const DEFAULT_ASSETS=[...DEFAULT_ASSETS_OTC,...DEFAULT_ASSETS_LIVE];
+const ASSETS_REFRESH_INTERVAL_MS=10*60*1000;
+const s={email:'',uid:'',rBal:0,dBal:0,currency:'USD',token:'',acc:'demo',asset:'EURUSD_otc',assets:[],strategy:'HUSAAM_EMA10',pOn:true,sOn:true,running:false,wins:0,losses:0,profit:0,pollInt:null,simT:null,sim:false,lastTradePopupId:null,hiddenLiveTradeId:null,availableAssets:{otc:[...DEFAULT_ASSETS_OTC],live:[...DEFAULT_ASSETS_LIVE],all:[...DEFAULT_ASSETS]},assetsAwaitingQuotex:false,assetsQuotexSynced:false,assetPayout:{},lastAssetsSyncAt:0,lastAssetsWarnAt:0,demoLimit:0,demoUsed:0,realMinBal:50,limitsInt:null};
 const MAX_ASSETS=3;
-const PAIR_FLAGS={EUR:'eu',USD:'us',GBP:'gb',AUD:'au',JPY:'jp',CAD:'ca',NZD:'nz'};
-const ASSET_PAYOUT={};
-ASSETS.forEach(a=>{
+const FIAT_FLAG={EUR:'eu',USD:'us',GBP:'gb',AUD:'au',JPY:'jp',CAD:'ca',NZD:'nz',CHF:'ch',MXN:'mx',TRY:'tr',ZAR:'za',CNY:'cn',CNH:'cn',HKD:'hk',SGD:'sg',NOK:'no',SEK:'se',DKK:'dk',PLN:'pl',RUB:'ru',INR:'in',BRL:'br',KRW:'kr',THB:'th',IDR:'id',PHP:'ph',MYR:'my',HUF:'hu',CZK:'cz',ILS:'il',AED:'ae',SAR:'sa',USDT:'us',USDC:'us',BUSD:'us',TUSD:'us',DAI:'us'};
+const QUOTE_SUFFIXES=['USDT','USDC','BUSD','TUSD','DAI','EUR','GBP','USD','JPY','AUD','CAD','CHF','NZD','MXN','TRY','TRU','ZAR','SEK','NOK','DKK','PLN','CNY','CNH','HKD','SGD','INR','RUB','BRL','KRW','THB','IDR','PHP','MYR','HUF','CZK','ILS','AED','SAR','ARS','BDT','COP','DZD','EGP','NGN','PKR'];
+const CRYPTO_ICON_BASE='https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/128/color';
+const CRYPTO_ICON_SLUG={BTC:'btc',ETH:'eth',BNB:'bnb',BCH:'bch',LTC:'ltc',XRP:'xrp',ADA:'ada',SOL:'sol',DOGE:'doge',TRX:'trx',DOT:'dot',LINK:'link',AVAX:'avax',AVA:'avax',ATOM:'atom',NEAR:'near',APT:'apt',ARB:'arb',OP:'op',XLM:'xlm',ETC:'etc',FIL:'fil',ICP:'icp',SHIB:'shib',UNI:'uni',AXS:'axs',MATIC:'matic',LRC:'lrc',APE:'ape',CRO:'cro',FTM:'ftm',ALGO:'algo',MANA:'mana',SAND:'sand',GRT:'grt',EOS:'eos',XTZ:'xtz',XMR:'xmr',ZEC:'zec',DASH:'dash',DAS:'dash',NEO:'neo',QTUM:'qtum',WAVES:'waves',THETA:'theta',VET:'vet',HBAR:'hbar',INJ:'inj',SUI:'sui',SEI:'sei',TIA:'tia',ORDI:'ordi',WIF:'wif',BONK:'bonk',PEPE:'pepe',FET:'fet',LUNA:'luna',RUNE:'rune',CRV:'crv',MKR:'mkr',SNX:'snx',COMP:'comp',YFI:'yfi',SUSHI:'sushi',AAVE:'aave',ENJ:'enj',CHZ:'chz',FLOW:'flow',GALA:'gala',IMX:'imx',STX:'stx',TWT:'twt',PAXG:'paxg','1INCH':'1inch'};
+const CRYPTO_DISPLAY_NAME={BTC:'Bitcoin',ETH:'Ethereum',BNB:'Binance Coin',BCH:'Bitcoin Cash',LTC:'Litecoin',XRP:'Ripple',ADA:'Cardano',SOL:'Solana',DOGE:'Dogecoin',TRX:'Tron',DOT:'Polkadot',LINK:'Chainlink',AVAX:'Avalanche',AVA:'Avalanche',ATOM:'Cosmos',NEAR:'Near Protocol',APT:'Aptos',ARB:'Arbitrum',OP:'Optimism',XLM:'Stellar',ETC:'Ethereum Classic',FIL:'Filecoin',ICP:'Internet Computer',SHIB:'Shiba Inu',UNI:'Uniswap',AXS:'Axie Infinity',MATIC:'Polygon',LRC:'Loopring',APE:'ApeCoin',CRO:'Cronos',FTM:'Fantom',ALGO:'Algorand',MANA:'Decentraland',SAND:'The Sandbox',GRT:'The Graph',EOS:'EOS',XTZ:'Tezos',XMR:'Monero',ZEC:'Zcash',DASH:'Dash',DAS:'Dash',NEO:'Neo',QTUM:'Qtum',WAVES:'Waves',THETA:'Theta',VET:'VeChain',HBAR:'Hedera',INJ:'Injective',SUI:'Sui',SEI:'Sei',TIA:'Celestia',ORDI:'ORDI',WIF:'dogwifhat',BONK:'Bonk',PEPE:'Pepe',FET:'Fetch.ai',LUNA:'Terra',RUNE:'THORChain',CRV:'Curve',MKR:'Maker',SNX:'Synthetix',COMP:'Compound',YFI:'Yearn Finance',SUSHI:'SushiSwap',AAVE:'Aave',ENJ:'Enjin Coin',CHZ:'Chiliz',FLOW:'Flow',GALA:'Gala',IMX:'Immutable',STX:'Stacks',TWT:'Trust Wallet Token',PAXG:'PAX Gold','1INCH':'1inch',TON:'Toncoin',ATO:'Ato',USDT:'Tether',USDC:'USD Coin',BUSD:'Binance USD',TUSD:'TrueUSD',DAI:'Dai'};
+const METAL_BADGE={XAU:'Au',XAG:'Ag',XPT:'Pt',XPD:'Pd'};
+const COMMODITY_BADGE={OIL:'Oil',WTI:'WTI',BRENT:'Br',NATGAS:'Ng',XBR:'Br',XTI:'WT',XNG:'Ng'};
+const COMMODITY_UI={
+  UKBRENT:{name:'UKBrent',icon:'🛢'},
+  BRENT:{name:'UKBrent',icon:'🛢'},
+  XBR:{name:'UKBrent',icon:'🛢'},
+  OIL:{name:'Oil',icon:'🛢'},
+  WTI:{name:'WTI',icon:'🛢'},
+  XTI:{name:'WTI',icon:'🛢'},
+  NATGAS:{name:'NatGas',icon:'⛽'},
+  XNG:{name:'NatGas',icon:'⛽'},
+  XAU:{name:'Gold',icon:'🥇'},
+  GOLD:{name:'Gold',icon:'🥇'},
+  XAG:{name:'Silver',icon:'🥈'},
+  SILVER:{name:'Silver',icon:'🥈'}
+};
+const STOCK_UI={
+  PFIZERINC:{name:'Pfizer Inc',logo:'https://logo.clearbit.com/pfizer.com'},
+  PFIZER:{name:'Pfizer Inc',logo:'https://logo.clearbit.com/pfizer.com'},
+  PFE:{name:'Pfizer Inc',logo:'https://logo.clearbit.com/pfizer.com'},
+  JOHNSONJOHNSON:{name:'Johnson & Johnson',logo:'https://logo.clearbit.com/jnj.com'},
+  JNJ:{name:'Johnson & Johnson',logo:'https://logo.clearbit.com/jnj.com'},
+  MICROSOFT:{name:'Microsoft',logo:'https://logo.clearbit.com/microsoft.com'},
+  MSFT:{name:'Microsoft',logo:'https://logo.clearbit.com/microsoft.com'},
+  BOEINGCOMPANY:{name:'Boeing Company',logo:'https://logo.clearbit.com/boeing.com'},
+  BOEING:{name:'Boeing Company',logo:'https://logo.clearbit.com/boeing.com'},
+  BA:{name:'Boeing Company',logo:'https://logo.clearbit.com/boeing.com'},
+  INTEL:{name:'Intel',logo:'https://logo.clearbit.com/intel.com'},
+  INTC:{name:'Intel',logo:'https://logo.clearbit.com/intel.com'},
+  MCDONALDS:{name:"McDonald's",logo:'https://logo.clearbit.com/mcdonalds.com'},
+  MCD:{name:"McDonald's",logo:'https://logo.clearbit.com/mcdonalds.com'},
+  FACEBOOKINC:{name:'Facebook Inc',logo:'https://logo.clearbit.com/meta.com'},
+  FACEBOOK:{name:'Facebook Inc',logo:'https://logo.clearbit.com/meta.com'},
+  FB:{name:'Facebook',logo:'https://logo.clearbit.com/facebook.com'},
+  META:{name:'Facebook Inc',logo:'https://logo.clearbit.com/meta.com'},
+  AMERICANEXPRESS:{name:'American Express',logo:'https://logo.clearbit.com/americanexpress.com'},
+  AXP:{name:'American Express',logo:'https://logo.clearbit.com/americanexpress.com'}
+};
+DEFAULT_ASSETS.forEach(a=>{
   const min=a.endsWith('_otc')?72:60;
   const max=a.endsWith('_otc')?92:86;
-  ASSET_PAYOUT[a]=Math.round(min+Math.random()*(max-min));
+  s.assetPayout[a]=Math.round(min+Math.random()*(max-min));
 });
+function getAvailableAssets(kind){
+  const arr=s.availableAssets&&Array.isArray(s.availableAssets[kind])?s.availableAssets[kind]:[];
+  /* وضع Quotex الحقيقي: لا تعرض DEFAULT أثناء انتظار /api/assets — يمنع ظهور أزواج غير مفتوحة */
+  if(s.assetsAwaitingQuotex&&!s.assetsQuotexSynced)return arr;
+  if(s.assetsQuotexSynced)return arr;
+  if(arr.length>0)return arr;
+  return kind==='otc'?[...DEFAULT_ASSETS_OTC]:[...DEFAULT_ASSETS_LIVE];
+}
+function getAvailableAssetSet(){
+  if(s.assetsQuotexSynced&&s.availableAssets&&Array.isArray(s.availableAssets.all))
+    return new Set(s.availableAssets.all);
+  if(s.assetsAwaitingQuotex&&!s.assetsQuotexSynced)
+    return new Set(Array.isArray(s.availableAssets?.all)?s.availableAssets.all:[]);
+  const all=(s.availableAssets&&Array.isArray(s.availableAssets.all)&&s.availableAssets.all.length>0)
+    ?s.availableAssets.all
+    :[...DEFAULT_ASSETS];
+  return new Set(all);
+}
+function sanitizeSelectedAssets(notify){
+  const allowed=getAvailableAssetSet();
+  const before=s.assets.length;
+  s.assets=s.assets.filter(a=>allowed.has(a));
+  if(!allowed.has(s.asset))s.asset=s.assets[0]||Array.from(allowed)[0]||'';
+  if(s.assets.length===0&&s.asset)s.assets=[s.asset];
+  const removed=before-s.assets.length;
+  if(notify&&removed>0&&Date.now()-s.lastAssetsWarnAt>4000){
+    s.lastAssetsWarnAt=Date.now();
+    toast('تم حذف أزواج مغلقة من اختيارك تلقائياً','wa');
+  }
+  updAssetLabel();
+}
+async function refreshAvailableAssets(notify){
+  if(!s.token)return;
+  const d=await api('/assets?token='+encodeURIComponent(s.token));
+  if(!d||d.success===false)return;
+  const a=d.assets||{};
+  const all=Array.isArray(a.all)?a.all:[];
+  s.availableAssets={
+    otc:Array.isArray(a.otc)?a.otc:[],
+    live:Array.isArray(a.live)?a.live:[],
+    all:all
+  };
+  if(d.from_quotex===true){
+    s.assetsQuotexSynced=true;
+    s.assetsAwaitingQuotex=false;
+  }
+  if(d.payouts&&typeof d.payouts==='object')Object.assign(s.assetPayout,d.payouts);
+  s.lastAssetsSyncAt=Date.now();
+  sanitizeSelectedAssets(!!notify);
+}
+let _quotexAssetRetryTimers=[];
+function clearQuotexAssetRetryTimers(){
+  _quotexAssetRetryTimers.forEach(t=>clearTimeout(t));
+  _quotexAssetRetryTimers=[];
+}
+function setRealQuotexAssetsPending(){
+  s.assetsAwaitingQuotex=true;
+  s.assetsQuotexSynced=false;
+  s.availableAssets={otc:[],live:[],all:[]};
+  sanitizeSelectedAssets(false);
+}
+function scheduleQuotexAssetRefreshRetries(){
+  clearQuotexAssetRetryTimers();
+  if(s.sim||!s.token)return;
+  const delays=[600,2000,5000,12000,25000,45000];
+  delays.forEach(ms=>{
+    _quotexAssetRetryTimers.push(setTimeout(()=>{
+      if(s.sim||!s.token)return;
+      refreshAvailableAssets(false);
+    },ms));
+  });
+}
+let assetsInitTimer=null;
+function scheduleAssetsRefreshAfterLogin(){
+  if(assetsInitTimer){clearTimeout(assetsInitTimer);assetsInitTimer=null;}
+  if(s.sim||!s.token)return;
+  assetsInitTimer=setTimeout(()=>{
+    assetsInitTimer=null;
+    refreshAvailableAssets(true);
+  },30000);
+}
 function tickSimPayouts(){
-  ASSETS.forEach(a=>{
+  getAvailableAssetSet().forEach(a=>{
     const min=a.endsWith('_otc')?72:60;
     const max=a.endsWith('_otc')?92:86;
     const step=(Math.random()<0.5?-1:1)*(1+Math.floor(Math.random()*2));
-    ASSET_PAYOUT[a]=Math.max(min,Math.min(max,(ASSET_PAYOUT[a]||min)+step));
+    s.assetPayout[a]=Math.max(min,Math.min(max,(s.assetPayout[a]||min)+step));
   });
 }
 setInterval(tickSimPayouts, 9000);
 const STRATEGIES=[
-  {key:'HUSAAM',label:'عبود',sub:'منهجية متعددة المؤشرات لفرص التداول عالية الجودة'},
-  {key:'HUSAAM_EMA10',label:'عبود EMA10',sub:'ارتدادات EMA10 على شموع الدقيقة مع تأكيد مغلق'}
+  {key:'HUSAAM_EMA10',label:'PREMIUM'},
 ];
-const STRAT_LABELS={HUSAAM:'عبود',HUSAAM_EMA10:'عبود EMA10'};
-function pairFlags(asset){
-  const p=asset.replace('_otc','');
-  const b=p.slice(0,3),q=p.slice(3,6);
-  return [PAIR_FLAGS[b]||'un',PAIR_FLAGS[q]||'un'];
+const STRAT_LABELS={HUSAAM_EMA10:'PREMIUM',HUSAAM:'PREMIUM'};
+(function ensureStrategyKey(){
+  if(!STRATEGIES.some(st=>st.key===s.strategy))s.strategy=STRATEGIES[0].key;
+  const vs=document.getElementById('vStrat');if(vs)vs.textContent=STRAT_LABELS[s.strategy]||STRATEGIES[0].label;
+})();
+function escHtml(t){
+  return String(t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
-function pairLabel(asset){return asset.replace('_otc',' OTC');}
-function pairPayout(asset){return `${ASSET_PAYOUT[asset]||80}%`;}
+function splitBaseQuote(asset){
+  const raw0=String(asset||'');
+  const otc=/_otc$/i.test(raw0);
+  let raw=raw0.replace(/_otc$/i,'').toUpperCase();
+  for(let i=0;i<QUOTE_SUFFIXES.length;i++){
+    const q=QUOTE_SUFFIXES[i];
+    if(raw.length>q.length&&raw.endsWith(q))return{base:raw.slice(0,-q.length),quote:q,otc};
+  }
+  if(raw.length===6&&/^[A-Z]{6}$/.test(raw))return{base:raw.slice(0,3),quote:raw.slice(3),otc};
+  return{base:raw,quote:'',otc};
+}
+function normalizeSymbolKey(v){
+  return String(v||'').toUpperCase().replace(/[^A-Z0-9]/g,'');
+}
+function commodityKeyFromAssetParts(base,quote){
+  const b=String(base||'').toUpperCase();
+  const q=String(quote||'').toUpperCase();
+  if(COMMODITY_UI[b])return b;
+  if(COMMODITY_UI[q])return q;
+  return null;
+}
+function stockKeyFromAssetParts(base,quote){
+  const b=normalizeSymbolKey(base);
+  const q=normalizeSymbolKey(quote);
+  if(STOCK_UI[b])return b;
+  if(STOCK_UI[q])return q;
+  return null;
+}
+function displayTokenName(tok){
+  const u=String(tok||'').toUpperCase();
+  if(u==='TRU')return 'TRY';
+  return CRYPTO_DISPLAY_NAME[u]||u;
+}
+function pairLabel(asset){
+  const{base,quote,otc}=splitBaseQuote(asset);
+  const cKey=commodityKeyFromAssetParts(base,quote);
+  if(cKey){
+    let t=COMMODITY_UI[cKey].name;
+    if(otc)t+=' (OTC)';
+    return t;
+  }
+  const sKey=stockKeyFromAssetParts(base,quote);
+  if(sKey){
+    let t=STOCK_UI[sKey].name;
+    if(otc)t+=' (OTC)';
+    return t;
+  }
+  let t=quote?`${displayTokenName(base)}/${displayTokenName(quote)}`:displayTokenName(base);
+  if(otc)t+=' (OTC)';
+  return t;
+}
+const _ASSET_CRYPTO_CODES=new Set([
+  ...Object.keys(CRYPTO_ICON_SLUG),
+  'BTC','ETH','BNB','SOL','XRP','DOGE','TRX','ADA','DOT','LTC','BCH',
+  'USDT','USDC','BUSD','TUSD','DAI','TON','ATO'
+]);
+const _ASSET_COMMODITY_CODES=new Set([
+  ...Object.keys(METAL_BADGE),
+  ...Object.keys(COMMODITY_BADGE),
+  'XAU','XAG','XPT','XPD','GOLD','SILVER','OIL','WTI','BRENT','NATGAS','UKBRENT'
+]);
+function classifyAssetKind(asset){
+  const p=splitBaseQuote(asset);
+  const base=String(p.base||'').toUpperCase();
+  const quote=String(p.quote||'').toUpperCase();
+  if(_ASSET_COMMODITY_CODES.has(base)||_ASSET_COMMODITY_CODES.has(quote))return 'commodities';
+  if(_ASSET_CRYPTO_CODES.has(base)||_ASSET_CRYPTO_CODES.has(quote))return 'crypto';
+  if(base&&quote&&QUOTE_SUFFIXES.includes(base)&&QUOTE_SUFFIXES.includes(quote))return 'forex';
+  return 'stocks';
+}
+function tokenIconHtml(tok,imgCls,genCls){
+  const u=String(tok||'').toUpperCase();
+  const key=normalizeSymbolKey(u);
+  if(!u)return `<span class="${genCls}" aria-hidden="true">·</span>`;
+  if(STOCK_UI[key]&&STOCK_UI[key].logo)return `<img class="${imgCls}" src="${STOCK_UI[key].logo}" alt="">`;
+  if(COMMODITY_UI[u])return `<span class="${genCls} oi-metal">${escHtml(COMMODITY_UI[u].icon)}</span>`;
+  if(METAL_BADGE[u])return `<span class="${genCls} oi-metal">${escHtml(METAL_BADGE[u])}</span>`;
+  if(COMMODITY_BADGE[u])return `<span class="${genCls} oi-metal">${escHtml(COMMODITY_BADGE[u])}</span>`;
+  if(FIAT_FLAG[u])return `<img class="${imgCls}" src="https://flagcdn.com/w20/${FIAT_FLAG[u]}.png" alt="">`;
+  const slug=CRYPTO_ICON_SLUG[u]||null;
+  if(slug)return `<img class="${imgCls}" src="${CRYPTO_ICON_BASE}/${slug}.png" alt="">`;
+  return `<span class="${genCls}">${escHtml(u.slice(0,Math.min(3,u.length)))}</span>`;
+}
+function pairIconsHtml(asset,imgCls,genCls){
+  const{base,quote}=splitBaseQuote(asset);
+  const cKey=commodityKeyFromAssetParts(base,quote);
+  if(cKey)return `<span class="oi-ic">${tokenIconHtml('USD',imgCls,genCls)}${tokenIconHtml(cKey,imgCls,genCls)}</span>`;
+  const sKey=stockKeyFromAssetParts(base,quote);
+  if(sKey)return `<span class="oi-ic">${tokenIconHtml('USD',imgCls,genCls)}${tokenIconHtml(sKey,imgCls,genCls)}</span>`;
+  if(quote)return `<span class="oi-ic">${tokenIconHtml(base,imgCls,genCls)}${tokenIconHtml(quote,imgCls,genCls)}</span>`;
+  return `<span class="oi-ic">${tokenIconHtml(base,imgCls,genCls)}${tokenIconHtml('USD',imgCls,genCls)}</span>`;
+}
+function pairPayout(asset){return `${s.assetPayout[asset]||80}%`;}
 function renderPairOption(asset){
-  const [b,q]=pairFlags(asset);
-  return `<div class="oi-row"><div class="oi-main"><span class="oi-check">✓</span></div><div class="oi-main"><span class="oi-name">${pairLabel(asset)}</span><img class="oi-flag" src="https://flagcdn.com/w20/${b}.png" alt="${b}"><img class="oi-flag" src="https://flagcdn.com/w20/${q}.png" alt="${q}"></div></div>`;
+  const icons=pairIconsHtml(asset,'oi-flag','oi-gen');
+  return `<div class="oi-row"><div class="oi-main"><span class="oi-check">✓</span></div><div class="oi-main"><span class="oi-name">${escHtml(pairLabel(asset))}</span>${icons}</div></div>`;
 }
-function apiErrMsg(d){
-  if(!d)return 'تعذر الاتصال بالخادم';
-  const x=d.detail;
-  if(Array.isArray(x))return String((x[0]&&(x[0].msg||x[0].message))||JSON.stringify(x)).slice(0,280);
-  if(typeof x==='string')return x.slice(0,400);
-  if(d._bodySnippet)return String(d._bodySnippet).slice(0,320);
-  if(d._httpStatus===504)return 'انتهت مهلة الخادم (504) — جرّب مرة أخرى';
-  if(d._httpStatus)return 'HTTP '+d._httpStatus;
-  return 'خطأ غير معروف';
+function renderAssetLabelChip(asset){
+  if(!asset)return '';
+  const icons=pairIconsHtml(asset,'oi-flag vaf-f','vaf-gen');
+  return `<span class="vaf-chip">${icons}<span class="vaf-txt">${escHtml(pairLabel(asset))}</span></span>`;
+}
+let _lastApiAttemptUrl='';
+function _nexoraApiOrigin(){
+  try{
+    const w=typeof window!=='undefined'?window:null;
+    if(w&&typeof w.NEXORA_API_BASE==='string'&&w.NEXORA_API_BASE.trim())
+      return w.NEXORA_API_BASE.trim().replace(/\/$/,'');
+    const m=document.querySelector('meta[name="nexora-api-base"]');
+    if(m){const c=(m.getAttribute('content')||'').trim();if(c)return c.replace(/\/$/,'');}
+    const h=String(location.hostname||'').toLowerCase();
+    if(h==='nexora-investment.com')
+      return `${location.protocol}//www.nexora-investment.com`.replace(/\/$/,'');
+    return '';
+  }catch(_){return '';}
+}
+function nexoraApiUrl(path){
+  const o=_nexoraApiOrigin();
+  const p='/api'+path;
+  if(o)return o.replace(/\/$/,'')+p;
+  return p;
 }
 async function api(path,method='GET',body=null){
+  const url=nexoraApiUrl(path);
+  _lastApiAttemptUrl=url;
   try{
-    const r=await fetch('/api'+path,{
-      method,
-      credentials:'same-origin',
-      headers:{'Content-Type':'application/json'},
-      body:body?JSON.stringify(body):null
-    });
-    const raw=await r.text();
-    let data={};
-    if(raw){
-      try{
-        const j=JSON.parse(raw);
-        data=(j!==null&&typeof j==='object')?j:{_wrap:j};
-      }catch{
-        data={_parseError:true,_bodySnippet:raw.slice(0,500)};
-      }
+    const r=await fetch(url,{method,headers:{'Content-Type':'application/json'},body:body?JSON.stringify(body):null});
+    const ct=(r.headers.get('content-type')||'').toLowerCase();
+    if(ct.includes('application/json'))return await r.json();
+    const t=await r.text();
+    try{return JSON.parse(t);}catch{
+      return{
+        success:false,
+        detail:'HTTP '+r.status+': رد ليس JSON. إن كان البوت على سيرفر بعيد لا تستخدم localhost في المتصفح؛ افتح عنوان السيرفر أو أنشئ SSH tunnel. راجع أيضاً أن Nginx يمرّر /api إلى المنفذ 8000',
+        _non_json:true
+      };
     }
-    data._httpStatus=r.status;
-    data._httpOk=r.ok;
-    return data;
   }catch(e){
+    console.error('[api]',url,e);
     return null;
   }
 }
+function _localDemoDayKey(){
+  try{return new Date().toISOString().slice(0,10);}catch(_){return'';}
+}
+function _localSimDemoStorageKey(){
+  const e=String(s.email||'').trim().toLowerCase();if(!e)return null;return 'nexora_demo_daily_'+e+'_'+_localDemoDayKey();
+}
+function getLocalSimDemoCount(){
+  const k=_localSimDemoStorageKey();if(!k)return 0;return parseInt(localStorage.getItem(k)||'0',10)||0;
+}
+function incLocalSimDemoCount(delta){
+  const k=_localSimDemoStorageKey();if(!k||!delta)return 0;
+  const n=(parseInt(localStorage.getItem(k)||'0',10)||0)+delta;
+  localStorage.setItem(k,String(n));
+  return n;
+}
+function applyStatusLimits(d){
+  if(!d||typeof d!=='object')return;
+  if(d.demo_max_trades_per_day!=null)s.demoLimit=Math.max(0,Number(d.demo_max_trades_per_day)||0);
+  if(d.demo_trades_today!=null)s.demoUsed=Math.max(0,Number(d.demo_trades_today)||0);
+  if(d.real_min_balance_usd!=null)s.realMinBal=Number(d.real_min_balance_usd)||50;
+}
 async function checkConn(){
-  const d=await api('/status?token='+encodeURIComponent(s.token||''));
-  if(d&&d._httpOk&&typeof d.sim_mode==='boolean') s.sim=!!d.sim_mode;
+  const d=await api('/status?token='+s.token);
+  if(d && typeof d.sim_mode==='boolean') s.sim=!!d.sim_mode;
+  if(d)applyStatusLimits(d);
   renderBadge();
 }
 function renderBadge(){
@@ -752,7 +1201,7 @@ async function doRegister(){
   const btn=document.getElementById('regBtn');btn.disabled=true;btn.textContent='⏳ جارٍ الإرسال...';
   const d=await api('/register','POST',{email,name});btn.disabled=false;btn.textContent='إرسال الطلب';
   if(!d)return toast('خطأ في الاتصال','er');
-  toast(d.message||(d.success?'تم':'خطأ'),d.success?'ok':'wa');
+  toast(d.message||d.detail||(d.success?'تم':'خطأ'),d.success?'ok':'wa');
   if(d.status==='approved'&&d.session_token){s.token=d.session_token;localStorage.setItem('at_token_'+email,s.token);localStorage.setItem('at_email',email);go('sLogin',-1);}
   else if(d.status==='pending'){document.getElementById('iCheckEmail').value=email;showCheck();}
 }
@@ -762,7 +1211,7 @@ async function doCheck(){
   const btn=document.getElementById('checkBtn');btn.disabled=true;btn.textContent='⏳ جارٍ التحقق...';
   const d=await api('/check_status?email='+encodeURIComponent(email));btn.disabled=false;btn.textContent='تحقق الآن';
   if(!d)return toast('خطأ في الاتصال','er');
-  toast(d.message||d.status,d.status==='approved'?'ok':d.status==='rejected'?'er':'wa');
+  toast(d.message||d.detail||d.status,d.status==='approved'?'ok':d.status==='rejected'?'er':'wa');
   if(d.status==='approved'&&d.session_token){s.token=d.session_token;localStorage.setItem('at_token_'+email,s.token);localStorage.setItem('at_email',email);go('sLogin',-1);}
 }
 async function doLogin(){
@@ -770,39 +1219,11 @@ async function doLogin(){
   if(!email||!email.includes('@'))return toast('بريد غير صحيح','er');if(pw.length<4)return toast('كلمة مرور قصيرة','er');
   const btn=document.getElementById('lBtn');btn.disabled=true;btn.textContent='⏳ جارٍ الاتصال...';
   const d=await api('/login','POST',{email,password:pw,token:s.token});
-  if(!d){btn.disabled=false;btn.textContent='تسجيل الدخول';return toast('تعذر الاتصال بالخادم','er');}
-  if(!d._httpOk){btn.disabled=false;btn.textContent='تسجيل الدخول';return toast(apiErrMsg(d),'er');}
-  if(!d.success){btn.disabled=false;btn.textContent='تسجيل الدخول';return toast(d.message||apiErrMsg(d)||'فشل','er');}
-  if(d.pending){
-    btn.textContent='⏳ جارٍ الاتصال بـ Quotex...';
-    const t0=Date.now(),maxMs=180000;
-    while(Date.now()-t0<maxMs){
-      await new Promise(r=>setTimeout(r,350));
-      const st=await api('/status?token='+encodeURIComponent(s.token));
-      if(!st)continue;
-      if(st._httpOk===false)continue;
-      if(st.needs_pin){
-        btn.disabled=false;btn.textContent='تسجيل الدخول';
-        document.getElementById('loginBox').style.display='none';
-        document.getElementById('pinBox').style.display='block';
-        document.getElementById('pinEmail').textContent=email;
-        const pe=document.getElementById('iPin');if(pe){pe.value='';requestAnimationFrame(()=>{pe.focus();pe.scrollIntoView({block:'nearest',behavior:'smooth'});});}
-        return toast('أدخل رمز PIN من البريد أو تطبيق Quotex','wa');
-      }
-      if(st.login_error){
-        btn.disabled=false;btn.textContent='تسجيل الدخول';
-        return toast(String(st.login_error).slice(0,400),'er');
-      }
-      if(st.logged_in){
-        btn.disabled=false;btn.textContent='تسجيل الدخول';
-        afterLogin({success:true,email:st.email||email,user_id:st.user_id,real_balance:st.real_balance,demo_balance:st.demo_balance,currency:st.currency,sim_mode:st.sim_mode});
-        return;
-      }
-    }
-    btn.disabled=false;btn.textContent='تسجيل الدخول';
-    return toast('انتهت مهلة الاتصال — أعد المحاولة','er');
-  }
   btn.disabled=false;btn.textContent='تسجيل الدخول';
+  if(!d){
+    const u=_lastApiAttemptUrl||nexoraApiUrl('/login');
+    return toast('تعذر الاتصال بالخادم. تأكد أن البوت والنفق يعملان وأن الطلب يصل إلى: '+u,'er');
+  }
   if(d.needs_pin){
     document.getElementById('loginBox').style.display='none';
     document.getElementById('pinBox').style.display='block';
@@ -810,6 +1231,7 @@ async function doLogin(){
     const pe=document.getElementById('iPin');if(pe){pe.value='';requestAnimationFrame(()=>{pe.focus();pe.scrollIntoView({block:'nearest',behavior:'smooth'});});}
     return toast('أدخل رمز PIN من البريد أو تطبيق Quotex','wa');
   }
+  if(!d.success)return toast(d.detail||d.message||'فشل','er');
   afterLogin(d);
 }
 async function doPin(){
@@ -817,22 +1239,20 @@ async function doPin(){
   const btn=document.getElementById('pinBtn');btn.disabled=true;btn.textContent='⏳ جارٍ الإرسال...';
   const d=await api('/pin','POST',{pin:String(pin),token:s.token});
   if(!d){btn.disabled=false;btn.textContent='تأكيد الرمز';return toast('تعذر الاتصال بالخادم','er');}
-  if(!d._httpOk){btn.disabled=false;btn.textContent='تأكيد الرمز';return toast(apiErrMsg(d),'er');}
-  if(!d.success){btn.disabled=false;btn.textContent='تأكيد الرمز';return toast(d.message||apiErrMsg(d)||'فشل','er');}
+  if(!d.success){btn.disabled=false;btn.textContent='تأكيد الرمز';return toast(d.detail||d.message||'فشل','er');}
   if(d.pending){
     btn.textContent='⏳ جارٍ التحقق...';
     const t0=Date.now(),maxMs=180000;
     while(Date.now()-t0<maxMs){
       await new Promise(r=>setTimeout(r,350));
       const st=await api('/status?token='+encodeURIComponent(s.token));
-      if(st&&st._httpOk===false)continue;
       if(st&&st.login_error){
         btn.disabled=false;btn.textContent='تأكيد الرمز';
         return toast(String(st.login_error).slice(0,400),'er');
       }
       if(st&&st.logged_in){
         btn.disabled=false;btn.textContent='تأكيد الرمز';
-        afterLogin({success:true,email:st.email,user_id:st.user_id,real_balance:st.real_balance,demo_balance:st.demo_balance,currency:st.currency,sim_mode:st.sim_mode});
+        afterLogin({success:true,email:st.email,user_id:st.user_id,real_balance:st.real_balance,demo_balance:st.demo_balance,currency:st.currency,sim_mode:st.sim_mode,demo_max_trades_per_day:st.demo_max_trades_per_day,demo_trades_today:st.demo_trades_today,real_min_balance_usd:st.real_min_balance_usd});
         return;
       }
     }
@@ -843,30 +1263,30 @@ async function doPin(){
   afterLogin(d);
 }
 function backLogin(){document.getElementById('pinBox').style.display='none';document.getElementById('loginBox').style.display='block';}
-async function pullBalancesSoon(){
-  if(s.sim||!s.token)return;
-  for(let i=0;i<5;i++){
-    const d=await api('/status?token='+encodeURIComponent(s.token));
-    if(d&&d._httpOk){
-      s.rBal=d.real_balance;s.dBal=d.demo_balance;if(d.currency)s.currency=d.currency;
-      updBals();
-      if((d.real_balance>0||d.demo_balance>0))break;
-    }
-    await new Promise(r=>setTimeout(r,1200));
-  }
-}
 function afterLogin(d){
   s.sim=!!d.sim_mode;
   renderBadge();
   s.email=d.email;s.uid='#'+d.user_id;s.rBal=d.real_balance||0;s.dBal=d.demo_balance||0;s.currency=d.currency||'USD';
-  if(s.token&&s.email)localStorage.setItem('at_token_'+s.email,s.token);
+  applyStatusLimits(d);
   document.getElementById('hId').textContent=s.uid;document.getElementById('hEm').textContent=s.email;document.getElementById('dEm').textContent=s.email;
   document.getElementById('pinBox').style.display='none';document.getElementById('loginBox').style.display='block';
-  updBals();toast('✅ مرحباً بك في فريق عبود تريدر','ok');go('sBot',2);if(!s.sim){startPoll();pullBalancesSoon();}
+  if(!s.sim){setRealQuotexAssetsPending();scheduleQuotexAssetRefreshRetries();}
+  else{s.assetsAwaitingQuotex=false;}
+  updBals();toast('✅ مرحباً بك في نيكسو تريد','ok');go('sBot',2);scheduleAssetsRefreshAfterLogin();
+  if(s.sim){
+    if(s.limitsInt)clearInterval(s.limitsInt);
+    s.limitsInt=setInterval(()=>{if(s.token)api('/status?token='+encodeURIComponent(s.token)).then(st=>{if(st)applyStatusLimits(st);});},25000);
+  }
+  if(!s.sim)startPoll();
 }
 async function doLogout(){
+  if(assetsInitTimer){clearTimeout(assetsInitTimer);assetsInitTimer=null;}
+  clearQuotexAssetRetryTimers();
+  if(s.limitsInt){clearInterval(s.limitsInt);s.limitsInt=null;}
   doStop();clearInterval(s.pollInt);if(s.token)await api('/logout','POST',{token:s.token});
-  s.token='';s.email='';s.running=false;localStorage.removeItem('at_email');go('sReg',-1);toast('تم تسجيل الخروج','');
+  s.token='';s.email='';s.running=false;s.assetsQuotexSynced=false;s.assetsAwaitingQuotex=false;
+  s.availableAssets={otc:[...DEFAULT_ASSETS_OTC],live:[...DEFAULT_ASSETS_LIVE],all:[...DEFAULT_ASSETS]};
+  localStorage.removeItem('at_email');go('sReg',-1);toast('تم تسجيل الخروج','');
 }
 async function togBot(){s.running?doStop():doStart();}
 async function doStart(){
@@ -874,21 +1294,39 @@ async function doStart(){
   const pl=s.pOn?(parseFloat(document.getElementById('iPL').value)||0):0;
   const sl=s.sOn?(parseFloat(document.getElementById('iSL').value)||0):0;
   if(amt<=0)return toast('أدخل مبلغ صحيح','er');
-  if(!s.token)return toast('انتهت الجلسة — أعد تسجيل الدخول','er');
-  const assetList=s.assets.length>0?s.assets:[s.asset];
+  const limD=Math.max(0,Number(s.demoLimit)||0);
+  if(s.acc==='demo'&&limD>0){
+    const used=s.sim?getLocalSimDemoCount():Math.max(0,Number(s.demoUsed)||0);
+    if(used>=limD)return toast('وصلت الحد اليومي لصفقات التجريبي ('+limD+'). يُتاح المزيد غداً أو استخدم الحساب الحقيقي.','er');
+  }
+  const minReal=Math.max(0,Number(s.realMinBal)||50);
+  if(s.acc==='real'&&!s.sim&&(Number(s.rBal)||0)<minReal){
+    return toast('رصيد الحساب الحقيقي أقل من الحد الأدنى المطلوب لتشغيل البوت ('+minReal+' USD).','er');
+  }
+  sanitizeSelectedAssets(false);
+  const allowed=getAvailableAssetSet();
+  const assetList=(s.assets.length>0?s.assets:[s.asset]).filter(a=>allowed.has(a));
+  if(assetList.length===0)return toast('لا يوجد أزواج متاحة للتداول الآن','er');
+  s.assets=[...assetList];
+  s.asset=assetList[0];
+  updAssetLabel();
   const body={asset:assetList[0],assets:assetList,amount:amt,strategy:s.strategy,account_type:s.acc,profit_limit:pl,stop_loss:sl,token:s.token};
   if(!s.sim){
-    const st=await api('/status?token='+encodeURIComponent(s.token));
-    if(!st||!st._httpOk)return toast(apiErrMsg(st)||'تعذر التحقق من الجلسة','er');
-    if(!st.logged_in)return toast('أكمل تسجيل الدخول أولاً وانتظر «متصل» ثم أعد المحاولة','er');
     const d=await api('/bot/start','POST',body);
-    if(!d||!d._httpOk||d.success===false)return toast(apiErrMsg(d)||'فشل تشغيل البوت','er');
+    if(d&&d.success!==true){
+      let msg='فشل';
+      const det=d.detail;
+      if(typeof det==='string')msg=det;
+      else if(Array.isArray(det)&&det[0]&&det[0].msg)msg=String(det[0].msg);
+      else if(d.message)msg=String(d.message);
+      return toast(msg,'er');
+    }
   }
   s.running=true;document.getElementById('stBtn').textContent='إيقاف البوت';document.getElementById('stBtn').classList.add('stop');
   toast('تم تشغيل البوت بنجاح','ok');if(s.sim)simCycle(amt,pl,sl);
 }
 async function doStop(){
-  if(!s.sim){const d=await api('/bot/stop','POST',{token:s.token});if(d&&d._httpOk===false)toast(apiErrMsg(d),'wa');}
+  if(!s.sim)await api('/bot/stop','POST',{token:s.token});
   s.running=false;clearTimeout(s.simT);clearInterval(pgInt);
   document.getElementById('ov').classList.remove('on');
   document.getElementById('stBtn').textContent='ابدأ التداول';document.getElementById('stBtn').classList.remove('stop');
@@ -900,6 +1338,13 @@ function simCycle(amt,pl,sl){
     const tr={asset:s.asset,direction:dir,amount:amt,strategy:s.strategy,status:win?'win':'loss',profit:prf,started_at:new Date().toISOString(),account:s.acc};
     if(win)s.wins++;else s.losses++;s.profit+=prf;
     if(s.acc==='real')s.rBal=Math.max(0,s.rBal+prf);else s.dBal=Math.max(0,s.dBal+prf);
+    if(s.acc==='demo'){
+      const limD=Math.max(0,Number(s.demoLimit)||0);
+      if(limD>0){
+        const n=incLocalSimDemoCount(1);
+        if(n>=limD){addLog(tr);updBals();updStats();updProfit(pl);doStop();toast('وصلت الحد اليومي لصفقات التجريبي ('+limD+').','er');return;}
+      }
+    }
     addLog(tr);updBals();updStats();updProfit(pl);
     toast(win?`✅ +${prf} ${s.currency}`:`❌ -${Math.abs(prf)} ${s.currency}`,win?'ok':'er');
     if(pl>0&&s.profit>=pl){doStop();toast(`🎯 وصلت لهدف الربح +${pl}`,'ok');return;}
@@ -912,12 +1357,11 @@ function showLive(asset,dir,secs,tradeId=''){
   const isUp=dir==='call';
   const ov=document.getElementById('ov');
   ov.dataset.tradeId=tradeId||'';
-  document.getElementById('lPair').textContent=asset.replace('_otc',' OTC');
-  document.getElementById('lStrat').textContent=STRAT_LABELS[s.strategy]||s.strategy;
+  document.getElementById('lPair').textContent=pairLabel(asset);
+  document.getElementById('lStrat').textContent=STRAT_LABELS[s.strategy]||'PREMIUM';
   document.getElementById('lDir').textContent=isUp?'▲ شراء':'▼ بيع';
   document.getElementById('lDir').className='ld '+(isUp?'up':'dn');
   document.getElementById('lAmt').textContent=(document.getElementById('iAmt').value||10)+' '+s.currency;
-  document.getElementById('lAcc').textContent=s.acc==='real'?'حقيقي':'تجريبي';
   document.getElementById('lProg').style.width='100%';document.getElementById('lProg').className='pf2 '+(isUp?'up':'dn');
   let el=secs;clearInterval(pgInt);
   pgInt=setInterval(()=>{el--;document.getElementById('lTmr').textContent=el+'s';document.getElementById('lProg').style.width=(el/secs*100)+'%';if(el<=0)clearInterval(pgInt);},1000);
@@ -940,7 +1384,8 @@ function showTradePopup(msg){
 }
 function startPoll(){
   s.pollInt=setInterval(async()=>{
-    const d=await api('/status?token='+encodeURIComponent(s.token||''));if(!d||!d._httpOk)return;
+    const d=await api('/status?token='+s.token);if(!d)return;
+    if(Date.now()-s.lastAssetsSyncAt>ASSETS_REFRESH_INTERVAL_MS)refreshAvailableAssets(false);
     s.rBal=d.real_balance;s.dBal=d.demo_balance;if(d.currency)s.currency=d.currency;
     s.wins=d.wins;s.losses=d.losses;s.profit=d.session_profit||0;
     updBals();updStats();
@@ -948,10 +1393,10 @@ function startPoll(){
     if(d.current_trade?.status==='pending'){
       const tidRaw=d.current_trade.id||(`${d.current_trade.asset}_${d.current_trade.started_at||''}`);
       const tid=String(tidRaw);
-      if(String(s.hiddenLiveTradeId||'')!==tid)showLive(d.current_trade.asset,d.current_trade.direction,60,tid);
+      if(String(s.hiddenLiveTradeId||'')!==tid)showLive(d.current_trade.asset,d.current_trade.direction,Number(d.current_trade.duration||60),tid);
       if(tid && s.lastTradePopupId!==tid){
         s.lastTradePopupId=tid;
-        const a=(d.current_trade.asset||'').replace('_otc',' OTC');
+        const a=pairLabel(d.current_trade.asset||'');
         const dr=d.current_trade.direction==='call'?'شراء':'بيع';
         showTradePopup(`تم فتح صفقة ${dr} على ${a}`);
       }
@@ -966,10 +1411,20 @@ function startPoll(){
       else{ csh.style.display='none'; }
     }
     if(d.status_msg&&d.status_msg!==''){
-      toast(d.status_msg,d.status_msg.includes('🎯')?'ok':'er');
-      let banner=document.getElementById('statusBanner');
-      if(!banner){banner=document.createElement('div');banner.id='statusBanner';banner.style.cssText='position:fixed;top:65px;left:50%;transform:translateX(-50%);z-index:500;background:var(--card2);border:2px solid;border-radius:16px;padding:14px 20px;font-size:14px;font-weight:700;text-align:center;max-width:90%;backdrop-filter:blur(12px);box-shadow:0 8px 30px rgba(0,0,0,.5);';document.body.appendChild(banner);}
-      banner.textContent=d.status_msg;banner.style.borderColor=d.status_msg.includes('🎯')?'var(--g)':'var(--r)';banner.style.color=d.status_msg.includes('🎯')?'var(--g)':'var(--r)';banner.style.display='block';
+      const sm=String(d.status_msg);
+      const hideSkipUi=(function(t){
+        if(!t)return false;
+        if(t.indexOf('نافذة الدخول خارج المدى')>=0)return true;
+        if(t.indexOf('تخطي الإشارة')>=0||t.indexOf('تخطّي الإشارة')>=0)return true;
+        if(t.indexOf('الوقت غير كافٍ لهذه الإشارة')>=0)return true;
+        return false;
+      })(sm);
+      if(!hideSkipUi){
+        toast(sm,sm.includes('🎯')?'ok':'er');
+        let banner=document.getElementById('statusBanner');
+        if(!banner){banner=document.createElement('div');banner.id='statusBanner';banner.style.cssText='position:fixed;top:65px;left:50%;transform:translateX(-50%);z-index:500;background:var(--card2);border:2px solid;border-radius:16px;padding:14px 20px;font-size:14px;font-weight:700;text-align:center;max-width:90%;backdrop-filter:blur(12px);box-shadow:0 8px 30px rgba(0,0,0,.5);';document.body.appendChild(banner);}
+        banner.textContent=_translateRuntime(sm);banner.style.borderColor=sm.includes('🎯')?'var(--g)':'var(--r)';banner.style.color=sm.includes('🎯')?'var(--g)':'var(--r)';banner.style.display='block';
+      }else{const banner=document.getElementById('statusBanner');if(banner)banner.style.display='none';}
     }else{const banner=document.getElementById('statusBanner');if(banner)banner.style.display='none';}
     if(!d.running&&s.running){s.running=false;document.getElementById('stBtn').textContent='ابدأ التداول';document.getElementById('stBtn').classList.remove('stop');}
   },5000);
@@ -997,6 +1452,174 @@ const LANG={
     tTradesLblPl:'trades'
   }
 };
+const _AR_TO_EN_RAW={
+  'NEXO TRADE | منصة التداول':'NEXO TRADE | Trading Platform',
+  'منصة تداول احترافية':'Professional Trading Platform',
+  'نيكسو تريد':'Nexo Trade',
+  'بوت التداول الآلي الذكي على منصة Quotex':'Smart automated trading bot on Quotex',
+  'طلب الانضمام':'Join Request',
+  'سجّل بياناتك — سيراجع المسؤول طلبك ويفعّل حسابك':'Enter your details - Admin reviews and activates your account',
+  'معرّف الحساب (ID)':'Account ID',
+  'أدخل الأيدي (أرقام فقط)':'Enter ID (numbers only)',
+  'البريد الإلكتروني':'Email',
+  'إرسال الطلب':'Send Request',
+  'لديّ حساب مفعّل ← تحقق من الحالة':'I have an active account - Check status',
+  'التحقق من حالة الطلب':'Request Status Check',
+  'أدخل بريدك لمعرفة حالة الطلب':'Enter your email to check request status',
+  'تحقق الآن':'Check Now',
+  '← إرسال طلب جديد':'<- Send New Request',
+  'NEXO TRADE — بوت التداول الذكي':'NEXO TRADE - Smart Trading Bot',
+  'تسجيل الدخول بحساب Quotex':'Login with Quotex Account',
+  'أدخل بيانات حساب Quotex الخاص بك':'Enter your Quotex account credentials',
+  'كلمة المرور':'Password',
+  'دخول وتشغيل البوت':'Login & Run Bot',
+  '← تسجيل خروج / تغيير الحساب':'<- Logout / Switch account',
+  'رمز التحقق':'Verification Code',
+  'أرسل Quotex رمزاً إلى':'Quotex sent a code to',
+  'رمز PIN':'PIN Code',
+  'تأكيد الرمز':'Confirm PIN',
+  '← العودة':'<- Back',
+  'مرحباً':'Welcome',
+  'متصل بـ Quotex':'Connected to Quotex',
+  'إيداع':'Deposit',
+  'سحب':'Withdraw',
+  'تسجيل خروج':'Logout',
+  'الحساب':'Account',
+  'الدعم':'Support',
+  'روبوت':'Bot',
+  'إحصائيات':'Statistics',
+  'اختيار الحساب':'Account Selection',
+  'الإعدادات':'Settings',
+  'الأزواج المختارة':'Selected Pairs',
+  'الاستراتيجية':'Strategy',
+  'المبلغ والحدود':'Amount and Limits',
+  'حجم الصفقة':'Trade Amount',
+  'هدف الربح':'Take Profit',
+  'حد الخسارة':'Stop Loss',
+  'زيادة':'Increase',
+  'نقصان':'Decrease',
+  'يوقف عند +':'Stops at +',
+  'يوقف عند -':'Stops at -',
+  'معطّل':'Disabled',
+  'مدة الصفقة:':'Trade duration:',
+  'الدخول يتم عند اكتمال الإشارة فقط':'Entry only when signal is complete',
+  'لا دخول عشوائي':'No random entries',
+  'يتم اختيار أفضل زوج تلقائياً':'Best pair auto-selected',
+  'ابدأ التداول':'Start Trading',
+  'العربية':'Arabic',
+  'مركز المساعدة':'Help Center',
+  'الأسئلة الشائعة وإرشادات الاستخدام':'FAQ and usage guidance',
+  'كيف أبدأ التداول؟':'How do I start trading?',
+  'ما الفرق بين الحساب الحقيقي والتجريبي؟':'What is the difference between real and demo?',
+  'كيف أضبط هدف الربح وحد الخسارة؟':'How to set take profit and stop loss?',
+  'كيف أختار أكثر من زوج؟':'How do I choose multiple pairs?',
+  'إغلاق':'Close',
+  'شراء':'Buy',
+  'بيع':'Sell',
+  'المبلغ':'Amount',
+  'الوقت':'Time',
+  'إيقاف البوت':'Stop Bot',
+  'اختر':'Select',
+  'إلغاء':'Cancel',
+  'وضع محاكاة':'Simulation Mode',
+  'متصل — Quotex جاهز':'Connected - Quotex Ready',
+  '⚠️ وضع المحاكاة — pyquotex غير متصلة':'Simulation mode - pyquotex is disconnected',
+  'جارٍ الإرسال...':'Sending...',
+  'جارٍ التحقق...':'Verifying...',
+  'جارٍ الاتصال...':'Connecting...',
+  'الأيدي يجب أن يكون أرقام فقط':'ID must contain numbers only',
+  'أدخل بريد صحيح':'Enter a valid email',
+  'خطأ في الاتصال':'Connection error',
+  'تم':'Done',
+  'خطأ':'Error',
+  'بريد غير صحيح':'Invalid email',
+  'كلمة مرور قصيرة':'Password too short',
+  'تعذر الاتصال بالخادم. تأكد أن البوت والنفق يعملان وأن الطلب يصل إلى: ':'Could not reach the server. Ensure the bot and tunnel are running; request URL: ',
+  'أدخل رمز PIN من البريد أو تطبيق Quotex':'Enter PIN from email or Quotex app',
+  'فشل':'Failed',
+  'أدخل PIN كامل':'Enter full PIN',
+  'تعذر الاتصال بالخادم':'Cannot connect to server',
+  'انتهت مهلة التحقق — جرّب رمزاً جديداً من البريد أو أعد تسجيل الدخول':'Verification timeout - try a new code or log in again',
+  '✅ مرحباً بك في نيكسو تريد':'Welcome to Nexo Trade',
+  'تم تسجيل الخروج':'Logged out',
+  'أدخل مبلغ صحيح':'Enter a valid amount',
+  'وصلت الحد اليومي لصفقات التجريبي (':'You reached daily demo trades limit (',
+  '). يُتاح المزيد غداً أو استخدم الحساب الحقيقي.':'). More available tomorrow or use real account.',
+  'رصيد الحساب الحقيقي أقل من الحد الأدنى المطلوب لتشغيل البوت (':'Real balance is below minimum required to run bot (',
+  ' USD).':' USD).',
+  'لا يوجد أزواج متاحة للتداول الآن':'No trading pairs available now',
+  'تم تشغيل البوت بنجاح':'Bot started successfully',
+  'وصلت الحد اليومي لصفقات التجريبي (':'Reached daily demo trades limit (',
+  ').':').',
+  '🎯 وصلت لهدف الربح +':'Take profit reached +',
+  '🛑 وصلت لحد الخسارة -':'Stop loss reached -',
+  'جارية...':'Running...',
+  '… جاري جلب الأزواج من المنصة':'Loading pairs from platform...',
+  'لا يوجد زوج متاح':'No pair available',
+  'اختر الأزواج':'Choose Pairs',
+  'جاري جلب الأزواج المفتوحة من Quotex…\nأعد فتح القائمة بعد قليل إن استمرت فارغة.':'Loading open pairs from Quotex...\nReopen the list shortly if still empty.',
+  'لا يوجد أزواج مفتوحة حالياً. جرّب بعد قليل.':'No open pairs currently. Try again shortly.',
+  '── OTC ──':'-- OTC --',
+  '── البورصة ──':'-- Exchange --',
+  'الحد الأقصى 3 أزواج':'Maximum is 3 pairs',
+  'اختر زوج واحد على الأقل':'Choose at least one pair',
+  '✅ تأكيد (':'Confirm (',
+  'اختر الاستراتيجية':'Choose Strategy',
+  '✅ تم استعادة جلستك':'Session restored'
+};
+const _AR_TO_EN=Object.entries(_AR_TO_EN_RAW).sort((a,b)=>b[0].length-a[0].length);
+const _TXT_ORIG=new WeakMap();
+const _ATTR_ORIG=new WeakMap();
+function _isArabicText(v){return /[\u0600-\u06FF]/.test(String(v||''));}
+function _toEn(v){
+  let t=String(v||'');
+  _AR_TO_EN.forEach(([ar,en])=>{t=t.split(ar).join(en);});
+  return t;
+}
+function _translateRuntime(v){return uiLang==='en' ? _toEn(v) : String(v||'');}
+function _applyTextNode(node){
+  const raw=String(node.nodeValue||'');
+  if(!raw.trim())return;
+  if(uiLang==='en'){
+    if(_isArabicText(raw))_TXT_ORIG.set(node,raw);
+    const base=_TXT_ORIG.get(node)||raw;
+    node.nodeValue=_toEn(base);
+  }else{
+    const base=_TXT_ORIG.get(node);
+    if(base!=null)node.nodeValue=base;
+  }
+}
+function _applyElementAttrs(el){
+  ['placeholder','title','aria-label'].forEach(attr=>{
+    if(!el.hasAttribute(attr))return;
+    let m=_ATTR_ORIG.get(el);
+    if(!m){m={};_ATTR_ORIG.set(el,m);}
+    const cur=el.getAttribute(attr)||'';
+    if(uiLang==='en'){
+      if(_isArabicText(cur))m[attr]=cur;
+      const base=m[attr]||cur;
+      el.setAttribute(attr,_toEn(base));
+    }else if(m[attr]!=null){
+      el.setAttribute(attr,m[attr]);
+    }
+  });
+}
+function _applyI18n(root){
+  const w=document.createTreeWalker(root,NodeFilter.SHOW_TEXT,{
+    acceptNode(node){
+      if(!node||!node.parentElement)return NodeFilter.FILTER_REJECT;
+      const p=node.parentElement.tagName;
+      if(p==='SCRIPT'||p==='STYLE')return NodeFilter.FILTER_REJECT;
+      return NodeFilter.FILTER_ACCEPT;
+    }
+  });
+  while(w.nextNode())_applyTextNode(w.currentNode);
+  if(root.nodeType===1)_applyElementAttrs(root);
+  root.querySelectorAll&&root.querySelectorAll('*').forEach(_applyElementAttrs);
+  document.title=_translateRuntime('NEXO TRADE | منصة التداول');
+}
+function _ensureI18nObserver(){}
+function _locale(){return uiLang==='en'?'en-US':'ar';}
 function updStatsLabels(){
   const d=LANG[uiLang]||LANG.ar;
   const elTitle=document.getElementById('stTitle');if(elTitle)elTitle.textContent=d.stTitle;
@@ -1008,11 +1631,17 @@ function updStatsLabels(){
 }
 function setLang(l){
   uiLang=(l==='en')?'en':'ar';
-  const bAr=document.getElementById('langAr'),bEn=document.getElementById('langEn');
-  if(bAr)bAr.classList.toggle('sel',uiLang==='ar');
-  if(bEn)bEn.classList.toggle('sel',uiLang==='en');
+  try{localStorage.setItem('nexora_ui_lang',uiLang);}catch(_){}
+  document.documentElement.lang=uiLang;
+  document.documentElement.dir=(uiLang==='en')?'ltr':'rtl';
+  document.querySelectorAll('.langBtn[data-lang]').forEach(btn=>{
+    btn.classList.toggle('sel',btn.dataset.lang===uiLang);
+  });
+  _applyI18n(document.body);
   updStatsLabels();
   updStats();
+  updAssetLabel();
+  renderBadge();
 }
 function stepVal(inputId,delta){
   const el=document.getElementById(inputId);if(!el)return;
@@ -1029,60 +1658,99 @@ function stepVal(inputId,delta){
 }
 const HELP={
   start:{
-    title:'كيف أبدأ التداول؟',
-    body:`
-      <div style="padding:8px 2px 2px;color:var(--tx);font-size:14px;font-weight:800;line-height:1.8;">
-        1) اختر حسابك (Real أو Demo).
-        <br>2) فعّل البوت من تبويب الروبوت.
-        <br>3) حدّد استراتيجية مناسبة واختَر أزواجاً كافية.
-        <br>4) راقب الإحصائيات وتأكد من تشغيل هدف الربح/حد الخسارة إذا رغبت.
-      </div>
-    `
+    ar:{
+      title:'كيف أبدأ التداول؟',
+      body:`
+        <div style="padding:8px 2px 2px;color:var(--tx);font-size:14px;font-weight:800;line-height:1.8;">
+          1) اختر حسابك (Real أو Demo).
+          <br>2) فعّل البوت من تبويب الروبوت.
+          <br>3) حدّد استراتيجية مناسبة واختَر أزواجاً كافية.
+          <br>4) راقب الإحصائيات وتأكد من تشغيل هدف الربح/حد الخسارة إذا رغبت.
+        </div>
+      `
+    },
+    en:{
+      title:'How do I start trading?',
+      body:`
+        <div style="padding:8px 2px 2px;color:var(--tx);font-size:14px;font-weight:800;line-height:1.8;">
+          1) Choose your account type (Real or Demo).
+          <br>2) Activate the bot from the Bot tab.
+          <br>3) Select a suitable strategy and enough trading pairs.
+          <br>4) Monitor statistics and enable take-profit/stop-loss if needed.
+        </div>
+      `
+    }
   },
   real_demo:{
-    title:'الحقيقي والتجريبي',
-    body:`
-      <div style="padding:8px 2px 2px;color:var(--tx);font-size:14px;font-weight:800;line-height:1.8;">
-        - Demo: تداول بمحاكاة لتجربة الإعدادات دون مخاطرة.
-        <br>- Real: تداول بأموال حقيقية.
-        <br><br>نصيحة: ابدأ بـ Demo ثم انتقل إلى Real بعد التأكد من ثبات الأداء.
-      </div>
-    `
+    ar:{
+      title:'الحقيقي والتجريبي',
+      body:`
+        <div style="padding:8px 2px 2px;color:var(--tx);font-size:14px;font-weight:800;line-height:1.8;">
+          - Demo: تداول بمحاكاة لتجربة الإعدادات دون مخاطرة.
+          <br>- Real: تداول بأموال حقيقية.
+          <br><br>نصيحة: ابدأ بـ Demo ثم انتقل إلى Real بعد التأكد من ثبات الأداء.
+        </div>
+      `
+    },
+    en:{
+      title:'Real vs Demo',
+      body:`
+        <div style="padding:8px 2px 2px;color:var(--tx);font-size:14px;font-weight:800;line-height:1.8;">
+          - Demo: simulated trading to test settings without risk.
+          <br>- Real: trading with real funds.
+          <br><br>Tip: start with Demo, then move to Real after stable performance.
+        </div>
+      `
+    }
   },
   profit_loss:{
-    title:'ضبط هدف الربح وحد الخسارة',
-    body:`
-      <div style="padding:8px 2px 2px;color:var(--tx);font-size:14px;font-weight:800;line-height:1.8;">
-        - فعّل زر هدف الربح وحدّد القيمة (بالـ USD).
-        <br>- فعّل زر حد الخسارة وحدّد القيمة (بالـ USD).
-        <br>- عند الوصول للهدف أو حد الخسارة يتوقف البوت تلقائياً.
-      </div>
-    `
-  },
-  best_strategy:{
-    title:'ما الاستراتيجية الأفضل؟',
-    body:`
-      <div style="padding:8px 2px 2px;color:var(--tx);font-size:14px;font-weight:800;line-height:1.8;">
-        الأفضل يعتمد على السوق، لكن عادةً:
-        <br>- إن كنت تريد فرصاً أكثر: جرّب «عبود EMA10» أو «عبود» بعد تعديل الحدود.
-        <br>- إن كنت تريد تأكيد أعلى: جرّب الوضع الصارم أو استراتيجية عبود مع حدود أدق.
-        <br><br>ابدأ بـ Demo ثم قيّم Win Rate وربح/خسارة الجلسة.
-      </div>
-    `
+    ar:{
+      title:'ضبط هدف الربح وحد الخسارة',
+      body:`
+        <div style="padding:8px 2px 2px;color:var(--tx);font-size:14px;font-weight:800;line-height:1.8;">
+          - فعّل زر هدف الربح وحدّد القيمة (بالـ USD).
+          <br>- فعّل زر حد الخسارة وحدّد القيمة (بالـ USD).
+          <br>- عند الوصول للهدف أو حد الخسارة يتوقف البوت تلقائياً.
+        </div>
+      `
+    },
+    en:{
+      title:'Take Profit / Stop Loss',
+      body:`
+        <div style="padding:8px 2px 2px;color:var(--tx);font-size:14px;font-weight:800;line-height:1.8;">
+          - Enable Take Profit and set its value (USD).
+          <br>- Enable Stop Loss and set its value (USD).
+          <br>- Bot stops automatically when either limit is reached.
+        </div>
+      `
+    }
   },
   multi_assets:{
-    title:'كيف أختار أكثر من زوج؟',
-    body:`
-      <div style="padding:8px 2px 2px;color:var(--tx);font-size:14px;font-weight:800;line-height:1.8;">
-        اختر عدة أزواج لزيادة فرص ظهور الإشارة بشكل متكرر.
-        <br>لكن لا تكثر كثيراً حتى تظل الإحصائيات مفهومة.
-        <br><br>قاعدة عملية: ابدأ بـ 2–5 أزواج ثم وسّع تدريجياً.
-      </div>
-    `
+    ar:{
+      title:'كيف أختار أكثر من زوج؟',
+      body:`
+        <div style="padding:8px 2px 2px;color:var(--tx);font-size:14px;font-weight:800;line-height:1.8;">
+          اختر عدة أزواج لزيادة فرص ظهور الإشارة بشكل متكرر.
+          <br>لكن لا تكثر كثيراً حتى تظل الإحصائيات مفهومة.
+          <br><br>قاعدة عملية: ابدأ بـ 2–5 أزواج ثم وسّع تدريجياً.
+        </div>
+      `
+    },
+    en:{
+      title:'How to choose multiple pairs?',
+      body:`
+        <div style="padding:8px 2px 2px;color:var(--tx);font-size:14px;font-weight:800;line-height:1.8;">
+          Choose multiple pairs to increase signal opportunities.
+          <br>But avoid selecting too many so stats remain clear.
+          <br><br>Practical rule: start with 2-5 pairs, then scale gradually.
+        </div>
+      `
+    }
   }
 };
 function openHelp(key){
-  const d=HELP[key]||HELP.start;
+  const pack=(HELP[key]||HELP.start);
+  const d=pack[uiLang]||pack.ar;
   const mt=document.getElementById('mTit');if(mt)mt.textContent=d.title;
   const ml=document.getElementById('mList');if(ml)ml.innerHTML=d.body;
   document.getElementById('mbg').classList.add('on');
@@ -1117,13 +1785,13 @@ function addLog(tr){
   if(!list)return;
   const nt=list.querySelector('.nt');if(nt)nt.remove();
   const win=tr.status==='win';const el=document.createElement('div');el.className='tli';
-  el.innerHTML=`<div class="tlr ${win?'w':tr.status==='loss'?'l':''}">${tr.status==='pending'?'جارية...':(win?'+':'')+tr.profit+' '+s.currency}</div><div class="tld ${tr.direction==='call'?'up':'dn'}">${tr.direction==='call'?'▲ شراء':'▼ بيع'}</div><div><div class="tlp">${(tr.asset||'').replace('_otc',' OTC')}</div><div class="tlt">${new Date(tr.started_at).toLocaleTimeString('ar')}</div></div>`;
+    el.innerHTML=`<div class="tlr ${win?'w':tr.status==='loss'?'l':''}">${tr.status==='pending'?_translateRuntime('جارية...'):(win?'+':'')+tr.profit+' '+s.currency}</div><div class="tld ${tr.direction==='call'?'up':'dn'}">${tr.direction==='call'?'▲ '+_translateRuntime('شراء'):'▼ '+_translateRuntime('بيع')}</div><div><div class="tlp">${escHtml(pairLabel(tr.asset||''))}</div><div class="tlt">${new Date(tr.started_at).toLocaleTimeString(_locale())}</div></div>`;
   list.insertBefore(el,list.firstChild);while(list.children.length>50)list.removeChild(list.lastChild);
 }
 function renderLogs(trades){
   const list=document.getElementById('logL');if(!list)return;list.innerHTML='';
   trades.forEach(t=>{const win=t.status==='win';const el=document.createElement('div');el.className='tli';
-    el.innerHTML=`<div class="tlr ${win?'w':'l'}">${win?'+':''}${t.profit||0} ${s.currency}</div><div class="tld ${t.direction==='call'?'up':'dn'}">${t.direction==='call'?'▲ شراء':'▼ بيع'}</div><div><div class="tlp">${(t.asset||'').replace('_otc',' OTC')}</div><div class="tlt">${new Date(t.started_at).toLocaleTimeString('ar')}</div></div>`;
+    el.innerHTML=`<div class="tlr ${win?'w':'l'}">${win?'+':''}${t.profit||0} ${s.currency}</div><div class="tld ${t.direction==='call'?'up':'dn'}">${t.direction==='call'?'▲ '+_translateRuntime('شراء'):'▼ '+_translateRuntime('بيع')}</div><div><div class="tlp">${escHtml(pairLabel(t.asset||''))}</div><div class="tlt">${new Date(t.started_at).toLocaleTimeString(_locale())}</div></div>`;
     list.appendChild(el);});
 }
 function selAcc(t){s.acc=t;document.getElementById('bReal').classList.toggle('sel',t==='real');document.getElementById('bDemo').classList.toggle('sel',t==='demo');}
@@ -1133,32 +1801,112 @@ document.addEventListener('input',e=>{
   if(e.target.id==='iPL'&&s.pOn)document.getElementById('plDesc').textContent=`يوقف عند +${e.target.value}`;
   if(e.target.id==='iSL'&&s.sOn)document.getElementById('slDesc').textContent=`يوقف عند -${e.target.value}`;
 });
-function updAssetLabel(){const arr=s.assets.length>0?s.assets:[s.asset];document.getElementById('vAsset').textContent=arr.map(a=>a.replace('_otc',' OTC')).join(' · ');}
+function updAssetLabel(){
+  const el=document.getElementById('vAsset');
+  if(!el)return;
+  const arr=(s.assets.length>0?s.assets:[s.asset]).filter(Boolean);
+  if(arr.length===0){
+    el.textContent=s.assetsAwaitingQuotex&&!s.assetsQuotexSynced?'… جاري جلب الأزواج من المنصة':'لا يوجد زوج متاح';
+    return;
+  }
+  el.innerHTML=arr.map(renderAssetLabelChip).join('<span class="vaf-sep"> / </span>');
+}
 function om(key){
   if(key==='assets'){
     document.getElementById('mTit').textContent='اختر الأزواج';
     const list=document.getElementById('mList');list.innerHTML='';
-    const h1=document.createElement('div');h1.style.cssText='font-size:10px;color:var(--gold);font-weight:700;padding:4px 2px 8px;letter-spacing:1px;';h1.textContent='── OTC ──';list.appendChild(h1);
-    ASSETS_OTC.forEach(a=>{const el=document.createElement('div');el.className='oi'+(s.assets.includes(a)?' sel':'');el.innerHTML=renderPairOption(a);el.onclick=()=>{if(s.assets.includes(a)){s.assets=s.assets.filter(x=>x!==a);el.classList.remove('sel');}else{if(s.assets.length>=MAX_ASSETS)return toast('الحد الأقصى 3 أزواج','wa');s.assets.push(a);el.classList.add('sel');}if(s.assets.length>0)s.asset=s.assets[0];updAssetLabel();updateConf();};list.appendChild(el);});
-    const h2=document.createElement('div');h2.style.cssText='font-size:10px;color:var(--g);font-weight:700;padding:10px 2px 8px;letter-spacing:1px;';h2.textContent='── البورصة ──';list.appendChild(h2);
-    ASSETS_LIVE.forEach(a=>{const el=document.createElement('div');el.className='oi'+(s.assets.includes(a)?' sel':'');el.innerHTML=renderPairOption(a);el.onclick=()=>{if(s.assets.includes(a)){s.assets=s.assets.filter(x=>x!==a);el.classList.remove('sel');}else{if(s.assets.length>=MAX_ASSETS)return toast('الحد الأقصى 3 أزواج','wa');s.assets.push(a);el.classList.add('sel');}if(s.assets.length>0)s.asset=s.assets[0];updAssetLabel();updateConf();};list.appendChild(el);});
+    sanitizeSelectedAssets(false);
+    const otcAssets=getAvailableAssets('otc');
+    const liveAssets=getAvailableAssets('live');
+    if(otcAssets.length===0&&liveAssets.length===0){
+      const msg=document.createElement('div');
+      msg.style.cssText='padding:16px 8px;color:var(--tx2);font-size:13px;font-weight:700;text-align:center;line-height:1.65;white-space:pre-line;';
+      msg.textContent=s.assetsAwaitingQuotex&&!s.assetsQuotexSynced
+        ?'جاري جلب الأزواج المفتوحة من Quotex…\nأعد فتح القائمة بعد قليل إن استمرت فارغة.'
+        :'لا يوجد أزواج مفتوحة حالياً. جرّب بعد قليل.';
+      list.appendChild(msg);
+      document.getElementById('mbg').classList.add('on');
+      return;
+    }
+    const allAssets=[...otcAssets,...liveAssets];
+    const groups={forex:[],commodities:[],crypto:[],stocks:[]};
+    allAssets.forEach(a=>{groups[classifyAssetKind(a)].push(a);});
+    const labels=(uiLang==='en')
+      ?{forex:'Currencies',commodities:'Commodities',crypto:'Crypto',stocks:'Stocks'}
+      :{forex:'العملات',commodities:'السلع',crypto:'العملات الرقمية',stocks:'الأسهم'};
+    const tabsOrder=['forex','commodities','crypto','stocks'];
+    const tabs=tabsOrder.filter(k=>groups[k].length>0);
+    let activeTab=tabs[0]||'forex';
+    const tabsWrap=document.createElement('div');
+    tabsWrap.style.cssText='display:flex;gap:8px;flex-wrap:wrap;margin:4px 0 10px;';
+    const assetsWrap=document.createElement('div');
+    list.appendChild(tabsWrap);
+    list.appendChild(assetsWrap);
+    const createAssetItem=(a)=>{
+      const el=document.createElement('div');
+      el.className='oi'+(s.assets.includes(a)?' sel':'');
+      el.innerHTML=renderPairOption(a);
+      el.onclick=()=>{
+        if(s.assets.includes(a)){
+          s.assets=s.assets.filter(x=>x!==a);
+          el.classList.remove('sel');
+        }else{
+          if(s.assets.length>=MAX_ASSETS)return toast('الحد الأقصى 3 أزواج','wa');
+          s.assets.push(a);
+          el.classList.add('sel');
+        }
+        if(s.assets.length>0)s.asset=s.assets[0];
+        updAssetLabel();
+        updateConf();
+      };
+      return el;
+    };
+    function renderActiveTab(){
+      assetsWrap.innerHTML='';
+      (groups[activeTab]||[]).forEach(a=>assetsWrap.appendChild(createAssetItem(a)));
+    }
+    tabs.forEach(tabKey=>{
+      const b=document.createElement('button');
+      b.type='button';
+      b.textContent=labels[tabKey];
+      b.style.cssText='border:1px solid rgba(77,183,255,.25);background:rgba(77,183,255,.08);color:var(--tx);padding:7px 12px;border-radius:11px;font-size:12px;font-weight:900;cursor:pointer;';
+      if(tabKey===activeTab)b.style.cssText+='background:linear-gradient(135deg,#4db7ff,#2979ff);border-color:rgba(41,121,255,.7);color:#fff;';
+      b.onclick=()=>{
+        activeTab=tabKey;
+        [...tabsWrap.children].forEach((x,i)=>{
+          const k=tabs[i];
+          x.style.cssText='border:1px solid rgba(77,183,255,.25);background:rgba(77,183,255,.08);color:var(--tx);padding:7px 12px;border-radius:11px;font-size:12px;font-weight:900;cursor:pointer;'+(k===activeTab?'background:linear-gradient(135deg,#4db7ff,#2979ff);border-color:rgba(41,121,255,.7);color:#fff;':'');
+        });
+        renderActiveTab();
+      };
+      tabsWrap.appendChild(b);
+    });
+    renderActiveTab();
     const conf=document.createElement('button');conf.style.cssText='width:100%;margin-top:14px;background:linear-gradient(135deg,var(--g),var(--g2));color:var(--bg);border:none;border-radius:13px;padding:14px;font-family:Roboto,sans-serif;font-size:14px;font-weight:900;cursor:pointer;';
     conf.onclick=()=>{if(s.assets.length===0){toast('اختر زوج واحد على الأقل','er');return;}updAssetLabel();cm(null,true);};
     function updateConf(){conf.textContent=`✅ تأكيد (${s.assets.length}/${MAX_ASSETS})`;}updateConf();
     list.appendChild(conf);
   }else if(key==='strategy'){
     document.getElementById('mTit').textContent='اختر الاستراتيجية';const list=document.getElementById('mList');list.innerHTML='';
-    STRATEGIES.forEach(st=>{const el=document.createElement('div');el.className='oi'+(st.key===s.strategy?' sel':'');el.innerHTML=`${st.label}<div class="sub">${st.sub}</div>`;el.onclick=()=>{s.strategy=st.key;document.getElementById('vStrat').textContent=STRAT_LABELS[st.key]||st.label;cm(null,true);};list.appendChild(el);});
+    STRATEGIES.forEach(st=>{const el=document.createElement('div');el.className='oi'+(st.key===s.strategy?' sel':'');el.textContent=st.label;el.onclick=()=>{s.strategy=st.key;document.getElementById('vStrat').textContent=STRAT_LABELS[st.key]||st.label;cm(null,true);};list.appendChild(el);});
   }
   document.getElementById('mbg').classList.add('on');
 }
 function cm(e,force){if(force||(e&&e.target===document.getElementById('mbg')))document.getElementById('mbg').classList.remove('on');}
+/** يزامن شريط التنقل السفلي في كل الشاشات (كل شاشة لها نسخة منفصلة من الشريط). */
+function syncBottomNavActive(idx){
+  if(idx==null||idx<0)return;
+  document.querySelectorAll('.scr > .nav').forEach(nav=>{
+    const items=[...nav.children].filter(el=>el.classList&&el.classList.contains('ni'));
+    items.forEach((el,i)=>el.classList.toggle('on',i===idx));
+  });
+}
 function go(id,idx){
   const next=document.getElementById(id);
   if(!next)return;
 
   const current=document.querySelector('.scr.on');
-  document.querySelectorAll('.ni').forEach((n,i)=>n.classList.toggle('on',i===idx));
+  syncBottomNavActive(idx);
 
   if(current===next)return;
   if(current){
@@ -1192,7 +1940,7 @@ function go(id,idx){
     next.style.transition='';
   },270);
 }
-let tT;function toast(msg,type){const el=document.getElementById('toastEl');el.textContent=msg;el.className='toast on '+(type||'');clearTimeout(tT);tT=setTimeout(()=>el.classList.remove('on'),4000);}
+let tT;function toast(msg,type){const el=document.getElementById('toastEl');el.textContent=_translateRuntime(msg);el.className='toast on '+(type||'');clearTimeout(tT);tT=setTimeout(()=>el.classList.remove('on'),10000);}
 
 // ── استعادة الجلسة تلقائياً ─────────────────────────────────
 const _em=localStorage.getItem('at_email');
@@ -1201,28 +1949,43 @@ if(_em){
   if(_tk){
     s.token=_tk;s.email=_em;
     (async()=>{
-      const d=await api('/status?token='+encodeURIComponent(_tk));
+      const d=await api('/status?token='+_tk);
       if(d&&d.logged_in){
         s.sim=!!d.sim_mode;
         s.email=d.email||_em;s.rBal=d.real_balance||0;s.dBal=d.demo_balance||0;
         s.currency=d.currency||'USD';s.wins=d.wins||0;s.losses=d.losses||0;
         s.profit=d.session_profit||0;s.running=d.running||false;
+        applyStatusLimits(d);
         const uid='#'+Math.abs(Array.from(s.email).reduce((a,c)=>a+c.charCodeAt(0),0)%90000000+10000000);
         document.getElementById('hId').textContent=uid;
         document.getElementById('hEm').textContent=s.email;
         document.getElementById('dEm').textContent=s.email;
         updBals();updStats();
         if(s.running){document.getElementById('stBtn').textContent='إيقاف البوت';document.getElementById('stBtn').classList.add('stop');}
-        go('sBot',2);if(!s.sim){startPoll();pullBalancesSoon();}
+        if(!s.sim){setRealQuotexAssetsPending();scheduleQuotexAssetRefreshRetries();}
+        else{s.assetsAwaitingQuotex=false;}
+        go('sBot',2);scheduleAssetsRefreshAfterLogin();
+        if(s.sim){
+          if(s.limitsInt)clearInterval(s.limitsInt);
+          s.limitsInt=setInterval(()=>{if(s.token)api('/status?token='+encodeURIComponent(s.token)).then(st=>{if(st)applyStatusLimits(st);});},25000);
+        }
+        if(!s.sim)startPoll();
         toast('✅ تم استعادة جلستك','ok');
       }else{go('sLogin',-1);}
     })();
   }
 }
-setLang('ar');
+_ensureI18nObserver();
+const _savedLang=(function(){try{return localStorage.getItem('nexora_ui_lang')||'ar';}catch(_){return 'ar';}})();
+setLang(_savedLang);
 checkConn();
-if('serviceWorker' in navigator){
-  navigator.serviceWorker.register('/sw.js',{scope:'/'}).catch(function(){});
+updAssetLabel();
+</script>
+<script>
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', function () {
+    navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(function () {});
+  });
 }
 </script>
 </body>

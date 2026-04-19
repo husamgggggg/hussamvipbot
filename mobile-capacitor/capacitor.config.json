@@ -1,10 +1,10 @@
 {
   "appId": "com.aboodtrader.app",
-  "appName": "Abood Trader",
+  "appName": "Nexo Trade",
   "webDir": "www",
   "server": {
     "androidScheme": "http",
-    "url": "http://187.127.142.123:8000/",
+    "url": "http://187.127.8.91:8000/",
     "cleartext": true
   },
   "android": {

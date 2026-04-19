@@ -1,11 +1,21 @@
+.idea/
+
+# أسرار وحالة محلية — لا ترفعها إلى Git
+.env
+.env.*
+!env.template
+session.json
+data/
+logs/
+*.log
+*.zip
+
+# Python
 .venv/
 venv/
 __pycache__/
 *.py[cod]
-session.json
-logs/
-*.log
-data/
-*.zip
-.env
-.env.*
+*.pyc
+
+# ملف عرضي فارغ (تعارض مع أوامر shell أحياناً)
+set

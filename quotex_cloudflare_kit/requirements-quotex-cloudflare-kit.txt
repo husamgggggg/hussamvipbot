@@ -1,0 +1,9 @@
+# حزمة الربط مع Quotex + بروكسي ZenRows + جسر Playwright لتجاوز قيود Cloudflare على WebSocket
+# Python 3.12+ موصى به لـ pyquotex
+pyquotex @ git+https://github.com/cleitonleonel/pyquotex.git
+zenrows
+websocket-client
+curl-cffi
+websockets
+playwright
+python-dotenv

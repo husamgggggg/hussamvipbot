@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Abood Trader Bot — النسخة النهائية الكاملة
+NEXORA TRADE Bot — النسخة النهائية الكاملة
 ✅ صفقة 60 ثانية ثابتة بدون marginal
 ✅ تحليل شمعات حقيقية من أسعار Quotex الحية
 ✅ حساب ربح/خسارة من رصيد المنصة الفعلي
@@ -8,25 +8,76 @@ Abood Trader Bot — النسخة النهائية الكاملة
 ✅ متعدد المشتركين كل بحسابه المستقل
 ✅ إشعار عند تحقق الهدف
 """
-import asyncio, json, logging, os, queue, random, re, sys
+import asyncio, base64, html, json, logging, os, queue, random, re, socket, ssl, subprocess, sys
+import secrets, threading, time, traceback, weakref
 from contextlib import asynccontextmanager
-import secrets, threading, time, traceback
+import urllib.parse
+import urllib.request
 from datetime import datetime, timezone
+from threading import Thread
+
+try:
+    import websocket  # type: ignore
+except Exception:  # pragma: no cover
+    websocket = None
+
+try:
+    from curl_cffi import requests as curl_requests  # type: ignore
+except Exception:  # pragma: no cover
+    curl_requests = None
 
 import pydantic, uvicorn
-from fastapi import FastAPI, HTTPException
+from fastapi import BackgroundTasks, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from pydantic import BaseModel
 
+
+def _load_local_env():
+    """تحميل ``.env`` من مجلد ``bot.py`` قبل قراءة ZENROWS_* وغيرها."""
+    try:
+        from dotenv import load_dotenv
+    except ImportError:
+        return
+    _base = os.path.dirname(os.path.abspath(__file__))
+    load_dotenv(os.path.join(_base, ".env"))
+
+
+_load_local_env()
+
+_QX_IMPORT_ERR = None
 try:
     from pyquotex.stable_api import Quotex
     QX = True
-except ImportError:
+except ImportError as e:
+    Quotex = None  # type: ignore[misc, assignment]
     QX = False
+    _QX_IMPORT_ERR = e
 
 # تشخيص آخر جلب شموع / WebSocket (للوج)
 _HUSAAM_WS_LAST: dict = {}
+_oanda_warn_log_ts: dict = {}
+
+
+def _install_pyquotex_ws_on_message_fix():
+    """
+    pyquotex يستدعي message.get() بعد json.loads حتى لو كان message نصًا — يسبب
+    'str' object has no attribute 'get' (ظهر مع Playwright bridge / تغيّر شكل الرسائل).
+    """
+    if not QX:
+        return
+    try:
+        from pyquotex.ws.client import WebsocketClient
+        from nexora_pyquotex_ws_on_message import on_message as _fixed_on_message
+    except ImportError as e:
+        logging.getLogger("NexoraTrade").warning("تعذر تطبيق تصحيح pyquotex on_message: %s", e)
+        return
+    if getattr(WebsocketClient.on_message, "_nexora_pyquotex_on_message_fix", False):
+        return
+    WebsocketClient.on_message = _fixed_on_message
+
+
+_install_pyquotex_ws_on_message_fix()
 
 
 def _ws_history_asset_matches(api, msg_asset, current_asset) -> bool:
@@ -56,6 +107,7 @@ def _install_pyquotex_ws_candle_asset_fix():
     if getattr(WebsocketClient.on_message, "_husaam_ws_patch", False):
         return
     _orig = WebsocketClient.on_message
+    _hist_log_ts = {}
 
     def _on_message(self, wss, msg):
         _orig(self, wss, msg)
@@ -77,10 +129,16 @@ def _install_pyquotex_ws_candle_asset_fix():
             hl = len(hist) if hist is not None else 0
         except Exception:
             hl = 0
-        _HUSAAM_WS_LAST["last_msg_asset"] = ma
-        _HUSAAM_WS_LAST["last_current_asset"] = ca
-        _HUSAAM_WS_LAST["last_history_len"] = hl
-        _HUSAAM_WS_LAST["last_ts"] = time.time()
+        api = getattr(self, "api", None)
+        if api is not None:
+            d = getattr(api, "_nexora_ws_last", None)
+            if not isinstance(d, dict):
+                d = {}
+                api._nexora_ws_last = d
+            d["last_msg_asset"] = ma
+            d["last_current_asset"] = ca
+            d["last_history_len"] = hl
+            d["last_ts"] = time.time()
         if not _ws_history_asset_matches(self.api, ma, ca):
             log.debug(
                 "WS history: asset غير متطابق (msg=%s current=%s) — قد يمنع pyquotex التخزين",
@@ -98,16 +156,28 @@ def _install_pyquotex_ws_candle_asset_fix():
                 self.api.candle_v2_data[ma] = message
             patched = True
         if patched:
-            _HUSAAM_WS_LAST["patched_fill"] = True
-            log.info(
-                "🔧 WS: عُدّل تخزين شموع history (msg_asset=%s current=%s hist_len=%s v2=%s)",
-                ma,
-                ca,
-                hl,
-                bool(message.get("candles")),
-            )
+            if api is not None:
+                d = getattr(api, "_nexora_ws_last", None)
+                if isinstance(d, dict):
+                    d["patched_fill"] = True
+            _k = str(ma or ca or "unknown")
+            _iv = float(os.getenv("WS_HISTORY_PATCH_LOG_INTERVAL_SEC", "15") or 15)
+            _iv = max(3.0, min(_iv, 300.0))
+            _tn = time.time()
+            if _tn - float(_hist_log_ts.get(_k, 0.0) or 0.0) >= _iv:
+                log.info(
+                    "🔧 WS: عُدّل تخزين شموع history (msg_asset=%s current=%s hist_len=%s v2=%s)",
+                    ma,
+                    ca,
+                    hl,
+                    bool(message.get("candles")),
+                )
+                _hist_log_ts[_k] = _tn
         else:
-            _HUSAAM_WS_LAST["patched_fill"] = False
+            if api is not None:
+                d = getattr(api, "_nexora_ws_last", None)
+                if isinstance(d, dict):
+                    d["patched_fill"] = False
 
     _on_message._husaam_ws_patch = True
     WebsocketClient.on_message = _on_message
@@ -115,76 +185,8 @@ def _install_pyquotex_ws_candle_asset_fix():
 
 _install_pyquotex_ws_candle_asset_fix()
 
-
-def _install_pyquotex_ws_reconnect_resilience():
-    """يمنع اعتبار انقطاع الشبكة/MNAT خطأ فادحاً؛ يمسح العلم بعد كل (إعادة) اتصال ناجح."""
-    if not QX:
-        return
-    try:
-        from pyquotex.ws.client import WebsocketClient
-        from pyquotex import global_value as gv
-    except ImportError:
-        return
-    if getattr(WebsocketClient, "_husaam_ws_reconnect_patch", False):
-        return
-    _orig_on_open = WebsocketClient.on_open
-    _orig_on_error = WebsocketClient.on_error
-
-    def on_open(self, wss):
-        gv.check_websocket_if_error = False
-        gv.websocket_error_reason = None
-        return _orig_on_open(self, wss)
-
-    def on_error(self, wss, error):
-        err_s = str(error)
-        transient = (
-            "Connection to remote host was lost",
-            "WebSocketConnectionClosedException",
-            "ping/pong timed out",
-            "Connection timed out",
-            "timed out",
-            "Connection reset",
-            "Broken pipe",
-            "Temporarily unavailable",
-            "[Errno 104]",
-            "[Errno 54]",
-            "EOF occurred",
-            "SSLEOFError",
-        )
-        if any(x in err_s for x in transient):
-            log.warning("WS انقطاع مؤقت (websocket-client سيعيد المحاولة إن reconnect>0): %s", err_s[:240])
-            return
-        return _orig_on_error(self, wss, error)
-
-    WebsocketClient.on_open = on_open
-    WebsocketClient.on_error = on_error
-    WebsocketClient._husaam_ws_reconnect_patch = True
-
-
-_install_pyquotex_ws_reconnect_resilience()
-
 os.makedirs("logs", exist_ok=True)
 os.makedirs("data", exist_ok=True)
-
-class _CloudflareWs403Filter(logging.Filter):
-    """يختصر سجلات websocket-client عندما يعيد Cloudflare صفحة التحدي بدل ترقية WS."""
-
-    def filter(self, record: logging.LogRecord) -> bool:
-        try:
-            msg = record.getMessage()
-        except Exception:
-            return True
-        if "Handshake status 403" not in msg:
-            return True
-        if len(msg) > 500 or "Just a moment" in msg or "cf-mitigated" in msg:
-            record.msg = (
-                "WebSocket handshake 403 — Cloudflare challenge على ws2.qxbroker.com "
-                "(عميل WS لا ينفّذ JavaScript). HTTP قد ينجح والـ WS يُرفض. "
-                "جرّب بروكسي سكني/خروج آخر، IP منزلي، أو تحديث pyquotex."
-            )
-            record.args = ()
-        return True
-
 
 logging.basicConfig(
     level=logging.INFO,
@@ -194,243 +196,27 @@ logging.basicConfig(
         logging.FileHandler("logs/bot.log", encoding="utf-8"),
     ],
 )
-for _h in logging.root.handlers:
-    _h.addFilter(_CloudflareWs403Filter())
-log = logging.getLogger("AboodTrader")
+log = logging.getLogger("NexoraTrade")
+_LOG_THROTTLE_TS: dict = {}
 
 
-def _acquire_single_instance_lock():
-    """
-    يمنع تشغيل أكثر من `python bot.py` على نفس الجهاز.
-    إن ظهرت PIDs مختلفة كل ثوانٍ في اللوج فالسبب غالباً systemd/حلقة shell أو عدة خدمات — هذا يقلّل التصادم على المنفذ والجلسات.
-    لتعطيل القفل (تشخيص فقط): BOT_SINGLE_INSTANCE_LOCK=0
-    """
-    raw = (os.getenv("BOT_SINGLE_INSTANCE_LOCK") or "1").strip().lower()
-    if raw in ("0", "false", "no", "off"):
-        log.warning("BOT_SINGLE_INSTANCE_LOCK=0 — القفل معطّل (خطر تشغيل نسختين)")
-        return None
+def _log_every(key: str, interval_sec: float) -> bool:
+    """يرجع True إذا مرّ زمن كافٍ لتسجيل الرسالة، لتخفيف ضجيج اللوج."""
     try:
-        import fcntl
-    except ImportError:
-        log.warning("قفل النسخة الواحدة غير متاح — على Windows تجنّب تشغيل نسختين يدوياً")
-        return None
-    import atexit
+        iv = float(interval_sec)
+    except Exception:
+        iv = 0.0
+    if iv <= 0:
+        return True
+    now = time.time()
+    last = float(_LOG_THROTTLE_TS.get(key, 0.0) or 0.0)
+    if now - last < iv:
+        return False
+    _LOG_THROTTLE_TS[key] = now
+    return True
 
-    lock_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "bot_instance.lock")
-    f = open(lock_path, "a+", encoding="utf-8")
-    try:
-        fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except BlockingIOError:
-        try:
-            f.seek(0)
-            prev = (f.read() or "").strip()
-        except Exception:
-            prev = ""
-        f.close()
-        port = int(os.getenv("PORT", "8000"))
-        # لا نستخدم log.error هنا — خدمة/cron تعيد تشغيل bot.py كل ثوانٍ فتملأ logs/bot.log
-        print(
-            f"رفض التشغيل (stderr): نسخة أخرى تعمل — PID في {lock_path}: {prev or '?'}. "
-            f"إذا curl http://127.0.0.1:{port}/ يعطي 200 فلا تعِد التشغيل. "
-            "أوقف المكرر: systemctl/cron/watchdog أو pkill -9 -f bot.py",
-            file=sys.stderr,
-            flush=True,
-        )
-        sys.exit(1)
-    f.seek(0)
-    f.truncate()
-    f.write(str(os.getpid()))
-    f.flush()
-
-    def _release():
-        try:
-            fcntl.flock(f.fileno(), fcntl.LOCK_UN)
-        except Exception:
-            pass
-        try:
-            f.close()
-        except Exception:
-            pass
-
-    atexit.register(_release)
-    return f
-
-
-def _parse_quotex_proxy_env():
-    """
-    QUOTEX_PROXY_URL مثال (IPRoyal HTTP):
-    http://USER:PASS@geo.iproyal.com:12321
-    إن وُجدت أحرف خاصة في كلمة المرور استخدم ترميز URL (%40 بدل @).
-    """
-    from urllib.parse import urlparse, unquote
-
-    raw = (os.getenv("QUOTEX_PROXY_URL") or "").strip()
-    if not raw:
-        return None, None
-    if "://" not in raw:
-        raw = "http://" + raw
-    u = urlparse(raw)
-    if not u.hostname:
-        return None, None
-    scheme = (u.scheme or "http").lower()
-    if scheme in ("socks5", "socks5h"):
-        default_port = 1080
-        ptype = "socks5h"
-    elif scheme in ("socks4", "socks4a"):
-        default_port = 1080
-        ptype = scheme
-    else:
-        default_port = 80
-        ptype = "http"
-    try:
-        raw_port = u.port
-    except ValueError:
-        log.error(
-            "QUOTEX_PROXY_URL غير صالح: المنفذ ليس رقماً (لا تستخدم ... في الرابط). "
-            "مثال: http://USER:PASS@geo.iproyal.com:12321"
-        )
-        raise SystemExit(1) from None
-    port = int(raw_port) if raw_port is not None else default_port
-    user = unquote(u.username or "")
-    pw = unquote(u.password or "")
-    auth = (user, pw) if (user or pw) else None
-    proxies = {"http": raw, "https": raw}
-    ws = {"host": u.hostname, "port": port, "auth": auth, "proxy_type": ptype}
-    return proxies, ws
-
-
-def _install_pyquotex_proxy_websocket(ws_proxy: dict | None):
-    """pyquotex يمرّر proxies لـ HTTP فقط؛ WebSocket يحتاج http_proxy_* في run_forever."""
-    if not QX or not ws_proxy:
-        return
-    import pyquotex.api as qapi
-    from pyquotex import global_value as qx_gv
-
-    async def _start_with_proxy(self):
-        for _k, _v in (
-            ("SSID", None),
-            ("check_websocket_if_connect", None),
-            ("check_websocket_if_error", False),
-            ("websocket_error_reason", None),
-            ("check_rejected_connection", False),
-            ("check_accepted_connection", False),
-        ):
-            if not hasattr(qx_gv, _k):
-                setattr(qx_gv, _k, _v)
-        qx_gv.check_websocket_if_connect = None
-        qx_gv.check_websocket_if_error = False
-        qx_gv.websocket_error_reason = None
-        if not getattr(qx_gv, "SSID", None):
-            await self.authenticate()
-        from pyquotex.ws.client import WebsocketClient
-
-        self.websocket_client = WebsocketClient(self)
-        # الهيدرز والكوكيز تُقرأ من WebSocketApp عند connect() — run_forever لا يقبل kwargs اسمه header.
-        wapp = self.websocket_client.wss
-        _sd = getattr(self, "session_data", None) or {}
-        if not isinstance(_sd, dict):
-            _sd = {}
-        _base = (getattr(self, "https_url", None) or "").rstrip("/")
-        _ck = (_sd.get("cookies") or "").strip()
-        if not _ck and hasattr(self, "browser") and getattr(self.browser, "cookies", None):
-            try:
-                _ck = "; ".join(f"{c.name}={c.value}" for c in self.browser.cookies)
-            except Exception:
-                pass
-        wapp.cookie = _ck or None
-        _ua = _sd.get("user_agent")
-        if isinstance(getattr(wapp, "header", None), dict):
-            if _ua:
-                wapp.header["User-Agent"] = _ua
-            if _base:
-                wapp.header["Origin"] = _base
-                wapp.header.setdefault("Referer", f"{_base}/")
-            wapp.header["Host"] = f"ws2.{self.host}"
-        log.info(
-            "WS عبر بروكسي: %s:%s | http_proxy_auth=%s | cookie≈%s حرف | User-Agent=%s",
-            ws_proxy["host"],
-            int(ws_proxy["port"]),
-            bool(ws_proxy.get("auth")),
-            len(_ck or ""),
-            "نعم" if _ua else "لا",
-        )
-        # ping أقصر يحافظ على NAT عبر البروكسي؛ timeout أطول يقلل قطع وهمي؛ reconnect فترة انتظار بين المحاولات
-        payload = {
-            "suppress_origin": True,
-            "ping_interval": 18,
-            "ping_timeout": 45,
-            "ping_payload": "2",
-            "origin": self.https_url,
-            "host": f"ws2.{self.host}",
-            "sslopt": {
-                "check_hostname": False,
-                "cert_reqs": qapi.ssl.CERT_NONE,
-                "ca_certs": qapi.cacert,
-                "context": qapi.ssl_context,
-            },
-            "reconnect": 8,
-            "http_proxy_host": ws_proxy["host"],
-            "http_proxy_port": int(ws_proxy["port"]),
-        }
-        if ws_proxy.get("auth"):
-            payload["http_proxy_auth"] = ws_proxy["auth"]
-        payload["proxy_type"] = ws_proxy.get("proxy_type") or "http"
-        if qapi.platform.system() == "Linux":
-            payload["sslopt"]["ssl_version"] = qapi.ssl.PROTOCOL_TLS
-        qapi.logger.warning(
-            "WS قبل run_forever: proxy=%s:%s ws_auth=%s payload_http_proxy_auth=%s cookie_len=%s wapp_header_dict=%s",
-            payload.get("http_proxy_host"),
-            payload.get("http_proxy_port"),
-            bool(ws_proxy.get("auth")),
-            bool(payload.get("http_proxy_auth")),
-            len(_ck or ""),
-            isinstance(getattr(wapp, "header", None), dict),
-        )
-        self.websocket_thread = qapi.threading.Thread(
-            target=self.websocket.run_forever, kwargs=payload
-        )
-        self.websocket_thread.daemon = True
-        self.websocket_thread.start()
-        # cwi==0 يحدث عند كل إغلاق مؤقت؛ run_forever(reconnect=N) يعيد الاتصال — لا تُفشل connect() فوراً
-        _ws_closed_since = None
-        _ws_grace_sec = 55.0
-        while True:
-            if getattr(qx_gv, "check_websocket_if_error", False):
-                return False, getattr(qx_gv, "websocket_error_reason", None)
-            cwi = getattr(qx_gv, "check_websocket_if_connect", None)
-            if cwi == 1:
-                qapi.logger.debug("Websocket connected successfully!!!")
-                return True, "Websocket connected successfully!!!"
-            if cwi == 0:
-                if _ws_closed_since is None:
-                    _ws_closed_since = time.monotonic()
-                    qapi.logger.debug("Websocket closed — نافذة إعادة اتصال %.0fs", _ws_grace_sec)
-                elif time.monotonic() - _ws_closed_since > _ws_grace_sec:
-                    qapi.logger.debug("Websocket connection closed.")
-                    return False, "Websocket connection closed."
-            else:
-                _ws_closed_since = None
-            if getattr(qx_gv, "check_rejected_connection", False) == 1:
-                setattr(qx_gv, "SSID", None)
-                qapi.logger.debug("Websocket Token Rejected.")
-                return True, "Websocket Token Rejected."
-            time.sleep(0.05)
-
-    qapi.QuotexAPI.start_websocket = _start_with_proxy
-
-
-_QX_PROXY_DICT, _QX_PROXY_WS = _parse_quotex_proxy_env()
-_install_pyquotex_proxy_websocket(_QX_PROXY_WS)
-
-
-def _log_quotex_proxy_if_enabled():
-    if _QX_PROXY_DICT and _QX_PROXY_WS:
-        log.info(
-            "🌐 QUOTEX_PROXY_URL مفعّل (HTTP + WebSocket عبر البروكسي: %s:%s)",
-            _QX_PROXY_WS["host"],
-            _QX_PROXY_WS["port"],
-        )
-
+if _QX_IMPORT_ERR is not None:
+    log.warning("pyquotex غير محمّل — وضع محاكاة. السبب: %s", _QX_IMPORT_ERR)
 
 def _configure_quiet_loggers():
     """يخفي سجل وصول Uvicorn وضجيج websocket (Sending ping) عند أي طريقة تشغيل."""
@@ -440,17 +226,688 @@ def _configure_quiet_loggers():
 
 _configure_quiet_loggers()
 
+
+def _init_zenrows_for_pyquotex():
+    """بروكسي pyquotex: ZENROWS_* أو QUOTEX_* أو HTTPS_PROXY — انظر zenrows_pyquotex.py."""
+    try:
+        from zenrows_pyquotex import configure_zenrows_from_environment
+
+        return configure_zenrows_from_environment()
+    except Exception as e:
+        log.warning("تهيئة ZenRows: %s", e)
+        return None
+
+
+def _parse_ws_proxy_from_http_proxies(proxies):
+    """
+    يحوّل proxies الخاصة بـ HTTP إلى kwargs مفهومة من websocket-client.
+    """
+    if not isinstance(proxies, dict):
+        return {}
+    raw = str(proxies.get("https") or proxies.get("http") or "").strip()
+    raw = raw.strip(" \t\n\r\"'")
+    if len(raw) >= 2 and raw[0] == raw[-1] and raw[0] in ('"', "'"):
+        raw = raw[1:-1].strip()
+    if not raw:
+        return {}
+    try:
+        u = urllib.parse.urlparse(raw)
+    except Exception:
+        return {}
+    host = u.hostname
+    if not host:
+        return {}
+    port = None
+    try:
+        port = u.port
+    except ValueError:
+        port = None
+    if port is None and u.netloc:
+        tail = u.netloc.split("@")[-1]
+        if ":" in tail:
+            maybe = tail.rsplit(":", 1)[-1].strip().strip('"').strip("'")
+            if maybe.isdigit():
+                port = int(maybe)
+    if not port:
+        return {}
+
+    scheme = (u.scheme or "http").lower()
+    if scheme.startswith("socks5"):
+        ptype = "socks5"
+    elif scheme.startswith("socks4"):
+        ptype = "socks4"
+    else:
+        ptype = "http"
+
+    ws_proxy = {
+        "http_proxy_host": host,
+        "http_proxy_port": int(port),
+        "proxy_type": ptype,
+    }
+    user = urllib.parse.unquote(u.username) if u.username else None
+    pwd = urllib.parse.unquote(u.password) if u.password else None
+    if user:
+        ws_proxy["http_proxy_auth"] = (user, pwd or "")
+    return ws_proxy
+
+
+# ========== الحل البرمجي الجذري لتجاوز Cloudflare WebSocket ==========
+# ملاحظة: هذا القسم اختياري/احتياطي. إذا لم تتوفر المكتبات المطلوبة، يُتخطّى تلقائياً.
+def is_cloudflare_ws_failure(error) -> bool:
+    txt = str(error or "").lower()
+    keys = (
+        "handshake status 403",
+        "cf-mitigated",
+        "cloudflare",
+        "connection to remote host was lost",
+        "forbidden",
+        "challenge",
+        "just a moment",
+    )
+    return any(k in txt for k in keys)
+
+
+def create_stealth_websocket(url, cookies=None, proxy=None):
+    """
+    تنشئ WebSocket متخفيًا بثلاث طبقات:
+    1) تهيئة جلسة HTTP عبر curl_cffi (إن توفرت) لجلب cookies.
+    2) إنشاء websocket-client بهيدرز وSSL context.
+    3) fallback لاحق عبر Playwright bridge.
+    """
+    cookies = cookies or {}
+    if curl_requests is None or websocket is None:
+        log.warning("Stealth WS: مكتبات غير متوفرة (curl_cffi/websocket-client)")
+        return None
+    try:
+        # no-op: keep structure consistent
+        pass
+    except Exception as e:
+        log.warning("Stealth WS: مكتبة غير متوفرة (%s)", e)
+        return None
+
+    session = curl_requests.Session()
+    session.headers.update(
+        {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/122.0.0.0 Safari/537.36"
+            ),
+            "Accept-Language": "en-US,en;q=0.9",
+            "Cache-Control": "no-cache",
+            "Pragma": "no-cache",
+            "Sec-WebSocket-Version": "13",
+            "Sec-WebSocket-Extensions": "permessage-deflate; client_max_window_bits",
+            "Origin": "https://quotex.io",
+            "Sec-WebSocket-Key": base64.b64encode(os.urandom(16)).decode(),
+        }
+    )
+    for ck, cv in cookies.items():
+        try:
+            session.cookies.set(str(ck), str(cv))
+        except Exception:
+            pass
+    try:
+        resp = session.get("https://quotex.io", impersonate="chrome120", timeout=30)
+        cf_cookie = resp.cookies.get("cf_clearance")
+        if cf_cookie:
+            session.cookies.set("cf_clearance", cf_cookie)
+    except Exception:
+        pass
+
+    ws_url = str(url or "").replace("http://", "ws://").replace("https://", "wss://")
+    ws_headers = {
+        "User-Agent": session.headers.get("User-Agent", ""),
+        "Origin": "https://quotex.io",
+        "Sec-WebSocket-Key": session.headers.get("Sec-WebSocket-Key", ""),
+        "Sec-WebSocket-Version": "13",
+        "Sec-WebSocket-Extensions": "permessage-deflate; client_max_window_bits",
+        "Cookie": "; ".join([f"{k}={v}" for k, v in session.cookies.items()]),
+    }
+
+    ssl_context = ssl.create_default_context()
+    try:
+        ssl_context.set_ciphers(
+            "ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:"
+            "ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384"
+        )
+    except Exception:
+        pass
+    is_zen = "zenrows" in str(proxy or "").lower()
+    if is_zen:
+        ssl_context.check_hostname = False
+        ssl_context.verify_mode = ssl.CERT_NONE
+
+    ws = websocket.WebSocketApp(
+        ws_url,
+        header=[f"{k}: {v}" for k, v in ws_headers.items() if v],
+        on_open=lambda w: log.info("WS stealth: مفتوح بنجاح"),
+        on_error=lambda w, err: log.warning("WS stealth error: %s", err),
+        on_close=lambda w, close_status, close_msg: log.warning("WS stealth: مغلق"),
+    )
+
+    # websocket-client لا يقبل "proxy" كسلسلة مباشرة داخل run_forever؛
+    # يمرّر http_proxy_host/http_proxy_port. هنا نمرر بدون proxy إذا ZenRows.
+    kwargs = {"sslopt": {"context": ssl_context}}
+    if proxy and not is_zen:
+        p = _parse_ws_proxy_from_http_proxies({"http": proxy, "https": proxy})
+        if p:
+            kwargs.update(p)
+
+    wst = Thread(target=ws.run_forever, kwargs=kwargs)
+    wst.daemon = True
+    wst.start()
+    time.sleep(2)
+    return ws
+
+
+async def playwright_websocket_bridge(target_wss_url, message_callback):
+    """
+    Bridge عبر Playwright (ثقيل) — fallback.
+    """
+    try:
+        from playwright.async_api import async_playwright  # type: ignore
+        import websockets  # type: ignore
+    except Exception as e:
+        log.warning("Playwright bridge غير متاح: %s", e)
+        return
+
+    async def handle_client(client_ws):
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(
+                headless=True,
+                args=["--disable-blink-features=AutomationControlled"],
+            )
+            page = await browser.new_page()
+            await page.goto("https://quotex.io", wait_until="domcontentloaded")
+            await page.evaluate(
+                """
+                (targetUrl) => {
+                  window.__nexora_ws = new WebSocket(targetUrl);
+                }
+                """,
+                target_wss_url,
+            )
+            try:
+                async for message in client_ws:
+                    safe = str(message).replace("\\", "\\\\").replace("'", "\\'")
+                    await page.evaluate(f"window.__nexora_ws && window.__nexora_ws.send('{safe}')")
+                    try:
+                        message_callback(message)
+                    except Exception:
+                        pass
+            finally:
+                await browser.close()
+
+    server = await websockets.serve(handle_client, "localhost", 8765)
+    await server.wait_closed()
+
+
+def get_websocket_via_tls_client(url):
+    try:
+        import tls_client  # type: ignore
+    except Exception as e:
+        log.warning("tls_client غير متاح: %s", e)
+        return None
+    session = tls_client.Session(
+        client_identifier="chrome_120",
+        random_tls_extension_order=True,
+    )
+    try:
+        resp = session.get("https://quotex.io")
+        return resp.cookies.get("cf_clearance")
+    except Exception as e:
+        log.warning("tls_client فشل: %s", e)
+        return None
+
+
+def establish_websocket_with_stealth(proxy=None):
+    """
+    محاولة إنشاء WebSocket بطريقة stealth قبل fallback التقليدي.
+    """
+    if proxy and "zenrows" in str(proxy).lower():
+        proxy = None
+        log.warning("ZenRows غير صالح لـ WebSocket، اعتماد stealth بدون بروكسي")
+    try:
+        ws = create_stealth_websocket("wss://quotex.io/some/ws", cookies={}, proxy=proxy)
+        if ws and getattr(ws, "sock", None) and ws.sock and ws.sock.connected:
+            return ws
+    except Exception as e:
+        log.warning("فشلت المحاولة البرمجية الأولى: %s", e)
+    # تجنّب RuntimeWarning عند وجود loop شغال: شغّل Playwright bridge في Thread مستقل.
+    if os.getenv("ENABLE_PLAYWRIGHT_BRIDGE", "").strip().lower() in ("1", "true", "yes", "on"):
+        try:
+            def _run_bridge_bg():
+                try:
+                    asyncio.run(
+                        playwright_websocket_bridge(
+                            "wss://quotex.io/some/ws",
+                            lambda x: log.debug("bridge: %s", x),
+                        )
+                    )
+                except Exception as e:
+                    log.warning("Playwright bridge فشل: %s", e)
+
+            t = Thread(target=_run_bridge_bg, daemon=True, name="playwright-ws-bridge")
+            t.start()
+            log.info("تم تشغيل Playwright bridge في الخلفية.")
+        except Exception as e:
+            log.warning("تعذر تشغيل Playwright bridge: %s", e)
+    else:
+        log.info("Playwright bridge معطّل (فعّله عبر ENABLE_PLAYWRIGHT_BRIDGE=1 إذا أردت).")
+    return None
+
+
+def _stop_playwright_bridge_for_api(api) -> None:
+    """
+    إيقاف جسر Playwright المرتبط بهذه جلسة QuotexAPI فقط.
+    عند وجود عدة حسابات، إيقاف جسر عام كان يقتل اتصال الحساب الآخر (Connection is already closed).
+    """
+    if api is None:
+        return
+    proc = getattr(api, "_nexora_pw_bridge_proc", None)
+    port = getattr(api, "_nexora_pw_bridge_port", None)
+    try:
+        api._nexora_pw_bridge_proc = None
+        api._nexora_pw_bridge_port = None
+        api._nexora_pw_bridge_target_ws_url = ""
+    except Exception:
+        pass
+    if proc is None:
+        return
+    try:
+        if proc.poll() is not None:
+            return
+    except Exception:
+        return
+    log.info("Playwright bridge: إيقاف جسر جلسة هذا الحساب (منفذ=%s)", port)
+    try:
+        proc.terminate()
+        proc.wait(timeout=8)
+    except Exception:
+        try:
+            proc.kill()
+        except Exception:
+            pass
+
+
+def _playwright_bridge_alive_for_api(api) -> bool:
+    if api is None:
+        return False
+    proc = getattr(api, "_nexora_pw_bridge_proc", None)
+    port = getattr(api, "_nexora_pw_bridge_port", None)
+    if proc is None or port is None:
+        return False
+    try:
+        if proc.poll() is not None:
+            return False
+    except Exception:
+        return False
+    try:
+        p = int(port)
+    except Exception:
+        return False
+    return _local_tcp_port_listening(p) or _wait_port_open("127.0.0.1", p, 0.8)
+
+
+def _pick_free_port() -> int:
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.bind(("127.0.0.1", 0))
+    port = int(s.getsockname()[1])
+    s.close()
+    return port
+
+
+def _wait_port_open(host: str, port: int, timeout_sec: float = 8.0) -> bool:
+    """
+    يتحقق أن المنفذ يقبل اتصال TCP فقط.
+    لا ترسل GET عادياً: خادم websockets يتوقع Upgrade: websocket وإلا InvalidUpgrade
+    (missing Connection header) وقد يفسد أول جلسة bridge.
+    """
+    end = time.time() + timeout_sec
+    while time.time() < end:
+        try:
+            with socket.create_connection((host, port), timeout=1.0) as s:
+                try:
+                    s.shutdown(socket.SHUT_RDWR)
+                except Exception:
+                    pass
+                return True
+        except Exception:
+            time.sleep(0.15)
+    return False
+
+
+def _local_tcp_port_listening(port: int) -> bool:
+    """LISTEN على 127.0.0.1 دون TCP connect — يتجنب InvalidMessage على خادم websockets."""
+    if sys.platform == "win32":
+        return False
+    try:
+        out = subprocess.check_output(["ss", "-ltn"], text=True, timeout=2, stderr=subprocess.DEVNULL)
+    except Exception:
+        return False
+    pat = re.compile(rf":{int(port)}\s")
+    for line in out.splitlines():
+        if "LISTEN" in line and pat.search(line):
+            return True
+    return False
+
+
+def _wait_local_port_listening(port: int, timeout_sec: float = 8.0) -> bool:
+    end = time.time() + timeout_sec
+    while time.time() < end:
+        if _local_tcp_port_listening(port):
+            return True
+        time.sleep(0.15)
+    return False
+
+
+def _ensure_playwright_bridge(target_ws_url: str, api_owner):
+    """
+    جسر محلي لكل جلسة pyquotex (api_owner). لا تُوقف جسور الحسابات الأخرى.
+    """
+    if not target_ws_url:
+        return None
+    bridge_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ws_bridge.py")
+    if not os.path.isfile(bridge_file):
+        log.warning("Playwright bridge file غير موجود: %s", bridge_file)
+        return None
+    # إعادة استخدام نفس الجسر للحساب إن كان حيّاً وبنفس target.
+    existing_target = str(getattr(api_owner, "_nexora_pw_bridge_target_ws_url", "") or "")
+    if _playwright_bridge_alive_for_api(api_owner) and existing_target == str(target_ws_url):
+        port = getattr(api_owner, "_nexora_pw_bridge_port", None)
+        if port:
+            log.info("♻️ Playwright WS bridge reused: ws://127.0.0.1:%s", port)
+            return f"ws://127.0.0.1:{int(port)}"
+
+    # إن كان هناك جسر قديم (ميت/هدف مختلف) نعيد إنشاؤه.
+    _stop_playwright_bridge_for_api(api_owner)
+
+    port = _pick_free_port()
+    # systemd غالباً لا يضع `python` في PATH — بدون الجسر يبقى WS مباشر وCloudflare يرد 403 challenge.
+    py_exe = (os.getenv("PYTHON_BIN") or "").strip() or sys.executable
+    cmd = [
+        py_exe,
+        bridge_file,
+        "--listen-host",
+        "127.0.0.1",
+        "--listen-port",
+        str(port),
+        "--target-url",
+        target_ws_url,
+    ]
+    try:
+        _bp = globals().get("QX_HTTP_PROXIES")
+        _bridge_px = ""
+        if isinstance(_bp, dict):
+            _bridge_px = str(_bp.get("https") or _bp.get("http") or "").strip()
+        if _bridge_px:
+            cmd.extend(["--proxy-url", _bridge_px])
+            log.info("Playwright bridge: تمرير بروكسي pyquotex إلى Chromium (تطابق IP مع جلسة الدخول)")
+    except Exception:
+        pass
+    # ── [NEXORA FIX C] تمرير cookies CF إلى الجسر ───────────────────────────
+    _bridge_email = str(getattr(api_owner, "email", "") or "").strip()
+    if _bridge_email:
+        try:
+            from cookie_bridge import get_cookies_file_path, has_cf_clearance
+            _cf_file = get_cookies_file_path(_bridge_email)
+            if _cf_file:
+                cmd.extend(["--cookies-file", _cf_file])
+                _has_cf = has_cf_clearance(_bridge_email)
+                log.info(
+                    "Playwright bridge: cookies CF مُمرَّرة (%s) — cf_clearance: %s",
+                    _cf_file,
+                    "موجود" if _has_cf else "مفقود — الجسر قد يواجه CF Challenge",
+                )
+            else:
+                log.warning(
+                    "[NEXORA] لا cookies CF للجسر (email=%s). "
+                    "أعد Login أولاً — تخطي الجسر لتجنب تعليق CF.",
+                    _bridge_email,
+                )
+                return None   # لا تُطلق الجسر بدون cookies
+        except Exception as _cbe:
+            log.debug("[cookie_bridge] in bridge launcher: %s", _cbe)
+    else:
+        log.warning("[NEXORA] api_owner.email غير موجود — الجسر سيعمل بدون cookies CF.")
+    # ─────────────────────────────────────────────────────────────────────────
+    try:
+        logs_dir = os.path.join(os.path.dirname(bridge_file), "logs")
+        os.makedirs(logs_dir, exist_ok=True)
+        bridge_log_path = os.path.join(logs_dir, "ws_bridge.log")
+        bridge_log = open(bridge_log_path, "a", encoding="utf-8")
+        proc = subprocess.Popen(
+            cmd,
+            cwd=os.path.dirname(bridge_file),
+            stdout=bridge_log,
+            stderr=bridge_log,
+        )
+        api_owner._nexora_pw_bridge_proc = proc
+        api_owner._nexora_pw_bridge_port = port
+        api_owner._nexora_pw_bridge_target_ws_url = str(target_ws_url)
+    except Exception as e:
+        log.warning("تعذر تشغيل Playwright bridge: %s", e)
+        try:
+            api_owner._nexora_pw_bridge_proc = None
+            api_owner._nexora_pw_bridge_port = None
+            api_owner._nexora_pw_bridge_target_ws_url = ""
+        except Exception:
+            pass
+        return None
+    if sys.platform != "win32":
+        bridge_ready = _wait_local_port_listening(port, 10.0) or _wait_port_open(
+            "127.0.0.1", port, 3.0
+        )
+    else:
+        bridge_ready = _wait_port_open("127.0.0.1", port, 10.0)
+    if not bridge_ready:
+        log.warning("Playwright bridge لم يبدأ على المنفذ %s", port)
+        try:
+            proc.kill()
+        except Exception:
+            pass
+        try:
+            api_owner._nexora_pw_bridge_proc = None
+            api_owner._nexora_pw_bridge_port = None
+            api_owner._nexora_pw_bridge_target_ws_url = ""
+        except Exception:
+            pass
+        return None
+    log.info("✅ Playwright WS bridge started: ws://127.0.0.1:%s (جلسة مستقلة لهذا الحساب)", port)
+    return f"ws://127.0.0.1:{port}"
+
+
+def _install_pyquotex_ws_proxy_patch(proxies):
+    """
+    pyquotex يمرّر proxy لطلبات HTTP فقط. هذا patch يمرّره أيضاً لـ WebSocket.
+    """
+    if not QX:
+        return
+    ws_proxy = _parse_ws_proxy_from_http_proxies(proxies)
+    if not ws_proxy:
+        log.warning("لم يتم العثور على WS proxy صالح (سيتم الاتصال بـ Quotex مباشرة).")
+        return
+    try:
+        import pyquotex.api as _qx_api_mod
+    except Exception as e:
+        log.warning("تعذر تحميل pyquotex.api لتفعيل WS proxy patch: %s", e)
+        return
+    QuotexAPI = getattr(_qx_api_mod, "QuotexAPI", None)
+    if QuotexAPI is None:
+        return
+    if getattr(QuotexAPI.start_websocket, "_nexora_ws_proxy_patch", False):
+        return
+
+    _ws_h = (ws_proxy.get("http_proxy_host") or "").lower()
+    _insecure_env = os.getenv("QUOTEX_WS_INSECURE_SSL", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+    # ZenRows (ومثله) يمرّر TLS عبر وسيط؛ مثل عيّنة Playground التي تستخدم verify=False.
+    ws_insecure_ssl = _insecure_env or "zenrows.com" in _ws_h
+
+    async def _start_websocket_with_proxy(self):
+        self.state.check_websocket_if_connect = None
+        self.state.check_websocket_if_error = False
+        self.state.websocket_error_reason = None
+        if not self.state.SSID:
+            await self.authenticate()
+        self.websocket_client = _qx_api_mod.WebsocketClient(self)
+
+        def _build_sslopt():
+            if ws_insecure_ssl:
+                log.warning(
+                    "WebSocket عبر بروكسي MITM: تعطيل التحقق من شهادة TLS (ZenRows أو QUOTEX_WS_INSECURE_SSL=1)"
+                )
+                _ssl = {
+                    "check_hostname": False,
+                    "cert_reqs": _qx_api_mod.ssl.CERT_NONE,
+                }
+            else:
+                _ssl = {
+                    "check_hostname": True,
+                    "cert_reqs": _qx_api_mod.ssl.CERT_REQUIRED,
+                    "ca_certs": _qx_api_mod.cacert,
+                    "context": _qx_api_mod.ssl_context,
+                }
+            if _qx_api_mod.platform.system() == "Linux":
+                _ssl["ssl_version"] = _qx_api_mod.ssl.PROTOCOL_TLS
+            return _ssl
+
+        async def _run_ws_once(*, via_bridge: bool) -> tuple:
+            self.state.check_websocket_if_connect = None
+            self.state.check_websocket_if_error = False
+            self.state.websocket_error_reason = None
+            bridge_ws_url = None
+            bridge_port = None
+            target_ws_url = getattr(self.websocket, "url", "") or ""
+            if via_bridge:
+                try:
+                    bridge_ws_url = _ensure_playwright_bridge(target_ws_url, self)
+                    if bridge_ws_url:
+                        self.websocket.url = bridge_ws_url
+                        bridge_port = getattr(self, "_nexora_pw_bridge_port", None)
+                        log.info("🔁 WebSocket redirected via Playwright bridge: %s", bridge_ws_url)
+                except Exception as e:
+                    log.warning("Playwright bridge redirect failed: %s", e)
+                    bridge_ws_url = None
+            else:
+                # تأكد من العودة للرابط الأصلي وليس ws://127.0.0.1 الخاص بالـbridge السابق.
+                try:
+                    _u = str(getattr(self.websocket, "url", "") or "")
+                    if _u.startswith("ws://127.0.0.1:"):
+                        self.websocket.url = target_ws_url
+                except Exception:
+                    pass
+
+            sslopt = _build_sslopt()
+            payload = {
+                "suppress_origin": True,
+                "ping_interval": 24,
+                "ping_timeout": 20,
+                "ping_payload": "2",
+                "origin": self.https_url if not bridge_ws_url else "http://127.0.0.1",
+                "host": (
+                    f"ws2.{self.host}"
+                    if not bridge_ws_url
+                    else f"127.0.0.1:{int(bridge_port or getattr(self, '_nexora_pw_bridge_port', 0) or 0)}"
+                ),
+                "sslopt": sslopt,
+            }
+            # عند استخدام bridge المحلي لا نمرّر proxy للـWS.
+            if not bridge_ws_url:
+                payload.update(ws_proxy)
+
+            self.websocket_thread = _qx_api_mod.threading.Thread(
+                target=self.websocket.run_forever, kwargs=payload
+            )
+            self.websocket_thread.daemon = True
+            self.websocket_thread.start()
+
+            while True:
+                if self.state.check_websocket_if_error:
+                    return False, self.state.websocket_error_reason
+                if self.state.check_websocket_if_connect == 0:
+                    return False, "Websocket connection closed."
+                if self.state.check_websocket_if_connect == 1:
+                    return True, "Websocket connected successfully!!!"
+                if self.state.check_rejected_connection == 1:
+                    self.state.SSID = None
+                    return True, "Websocket Token Rejected."
+                await asyncio.sleep(0.1)
+
+        use_bridge = os.getenv("QUOTEX_USE_PLAYWRIGHT_BRIDGE", "").strip().lower() in ("1", "true", "yes", "on")
+        # ── [NEXORA FIX D] guard: لا تُفعَّل الجسر بدون cf_clearance ──────────
+        if use_bridge:
+            _bridge_email = str(getattr(self, "email", "") or "").strip()
+            if _bridge_email:
+                try:
+                    from cookie_bridge import has_cf_clearance
+                    if not has_cf_clearance(_bridge_email):
+                        log.warning(
+                            "[NEXORA] QUOTEX_USE_PLAYWRIGHT_BRIDGE=1 لكن cf_clearance "
+                            "غير موجود لـ %s — تعطيل الجسر لهذا الاتصال. "
+                            "أعد Login أولاً لتوليد cookies CF.",
+                            _bridge_email,
+                        )
+                        use_bridge = False
+                except Exception as _cbe:
+                    log.debug("[cookie_bridge] guard check: %s", _cbe)
+        # ─────────────────────────────────────────────────────────────────────
+        if use_bridge:
+            ok, msg = await _run_ws_once(via_bridge=True)
+            if ok:
+                return ok, msg
+            # fallback: إذا فشل bridge رغم وجود cookies، نجرب WS مباشر.
+            log.warning("Playwright bridge WS failed (%s) — retry direct WS", msg or "unknown")
+            try:
+                _stop_playwright_bridge_for_api(self)
+            except Exception:
+                pass
+            return await _run_ws_once(via_bridge=False)
+
+        return await _run_ws_once(via_bridge=False)
+
+    _start_websocket_with_proxy._nexora_ws_proxy_patch = True
+    QuotexAPI.start_websocket = _start_websocket_with_proxy
+    _iv = float(os.getenv("WS_PROXY_PATCH_LOG_INTERVAL_SEC", "300") or 300)
+    _iv = max(30.0, min(_iv, 3600.0))
+    if _log_every("ws_proxy_patch_info", _iv):
+        log.info(
+            "تم تفعيل WS proxy patch لـ pyquotex: %s:%s (%s)",
+            ws_proxy.get("http_proxy_host"),
+            ws_proxy.get("http_proxy_port"),
+            ws_proxy.get("proxy_type"),
+        )
+
+
+QX_HTTP_PROXIES = _init_zenrows_for_pyquotex()
+_install_pyquotex_ws_proxy_patch(QX_HTTP_PROXIES)
+
 USERS_F  = "data/users.json"
+USERS_SESSIONS_F = "data/user_trading_sessions.json"
+ADMIN_SETTINGS_F = "data/admin_settings.json"
+DEMO_DAILY_TRADES_F = "data/demo_daily_trades.json"
+# الحد الأدنى لتشغيل البوت على الحساب الحقيقي (USD)
+REAL_MIN_BALANCE_USD = 50.0
+# تسجيل خروج تلقائي إذا مرّ هذا الوقت والمستخدم لم يشغّل البوت
+try:
+    NO_BOT_AUTO_LOGOUT_SEC = int(os.getenv("NO_BOT_AUTO_LOGOUT_SEC", "900") or 900)
+except (TypeError, ValueError):
+    NO_BOT_AUTO_LOGOUT_SEC = 900
+NO_BOT_AUTO_LOGOUT_SEC = max(300, min(NO_BOT_AUTO_LOGOUT_SEC, 7 * 24 * 3600))
 ADMIN_PW = os.getenv("ADMIN_PW", "Admin@2024")
-# للوصول عبر IP بدون دومين: export ALLOWED_ORIGINS='*' (أو أضف http://YOUR_IP:8000)
+MAINTENANCE_ACTIVATION_PW = os.getenv("MAINTENANCE_ACTIVATION_PW", "62336557")
+MAINTENANCE_BYPASS_TOKEN = str(os.getenv("MAINTENANCE_BYPASS_TOKEN", "") or "").strip()
+MAINTENANCE_BYPASS_COOKIE = "nexora_maintenance_bypass"
 _ALLOWED_ORIGINS_RAW = os.getenv(
     "ALLOWED_ORIGINS",
     "http://localhost:8000,http://127.0.0.1:8000",
-).strip()
-if _ALLOWED_ORIGINS_RAW == "*":
-    ALLOWED_ORIGINS = ["*"]
-else:
-    ALLOWED_ORIGINS = [o.strip() for o in _ALLOWED_ORIGINS_RAW.split(",") if o.strip()]
+)
+ALLOWED_ORIGINS = [o.strip() for o in _ALLOWED_ORIGINS_RAW.split(",") if o.strip()]
 if not ALLOWED_ORIGINS:
     ALLOWED_ORIGINS = ["http://localhost:8000"]
 if ADMIN_PW == "Admin@2024":
@@ -511,6 +968,275 @@ _load_admin_tokens_into_set()
 
 def save_users(): save(USERS_F, USERS)
 
+
+def _demo_stat_email_key(email: str) -> str:
+    return (email or "").strip().lower()
+
+
+def _admin_settings_dict() -> dict:
+    raw = load(ADMIN_SETTINGS_F, {})
+    if not isinstance(raw, dict):
+        raw = {}
+    try:
+        lim = int(raw.get("demo_max_trades_per_day", 5))
+    except (TypeError, ValueError):
+        lim = 5
+    if lim < 0:
+        lim = 0
+    maintenance_mode = bool(raw.get("maintenance_mode", False))
+    maintenance_updated_at = str(raw.get("maintenance_updated_at", "") or "")
+    return {
+        "demo_max_trades_per_day": lim,
+        "maintenance_mode": maintenance_mode,
+        "maintenance_updated_at": maintenance_updated_at,
+    }
+
+
+def _save_admin_settings_dict(st: dict) -> None:
+    cur = _admin_settings_dict()
+    if not isinstance(st, dict):
+        st = {}
+    try:
+        lim = int(st.get("demo_max_trades_per_day", cur.get("demo_max_trades_per_day", 5)))
+    except (TypeError, ValueError):
+        lim = int(cur.get("demo_max_trades_per_day", 5) or 5)
+    if lim < 0:
+        lim = 0
+    mm = bool(st.get("maintenance_mode", cur.get("maintenance_mode", False)))
+    mu = str(st.get("maintenance_updated_at", cur.get("maintenance_updated_at", "")) or "")
+    save(
+        ADMIN_SETTINGS_F,
+        {
+            "demo_max_trades_per_day": lim,
+            "maintenance_mode": mm,
+            "maintenance_updated_at": mu,
+        },
+    )
+
+
+def _demo_trades_daily_limit() -> int:
+    """0 = بلا حد يومي للتجريبي."""
+    return int(_admin_settings_dict().get("demo_max_trades_per_day", 0) or 0)
+
+
+def _demo_trades_today_count(email: str) -> int:
+    data = load(DEMO_DAILY_TRADES_F, {})
+    if not isinstance(data, dict):
+        return 0
+    key = _demo_stat_email_key(email)
+    by_email = data.get(key)
+    if not isinstance(by_email, dict):
+        return 0
+    day = datetime.now().strftime("%Y-%m-%d")
+    try:
+        return int(by_email.get(day, 0) or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _demo_trades_increment(email: str, n: int) -> int:
+    if n <= 0:
+        return _demo_trades_today_count(email)
+    data = load(DEMO_DAILY_TRADES_F, {})
+    if not isinstance(data, dict):
+        data = {}
+    key = _demo_stat_email_key(email)
+    day = datetime.now().strftime("%Y-%m-%d")
+    if key not in data or not isinstance(data.get(key), dict):
+        data[key] = {}
+    try:
+        prev = int(data[key].get(day, 0) or 0)
+    except (TypeError, ValueError):
+        prev = 0
+    data[key][day] = prev + int(n)
+    try:
+        save(DEMO_DAILY_TRADES_F, data)
+    except Exception:
+        pass
+    return int(data[key][day])
+
+
+def _load_ux_sessions() -> list:
+    data = load(USERS_SESSIONS_F, [])
+    return data if isinstance(data, list) else []
+
+
+def _save_ux_sessions(arr: list) -> None:
+    try:
+        os.makedirs(os.path.dirname(USERS_SESSIONS_F) or ".", exist_ok=True)
+    except Exception:
+        pass
+    save(USERS_SESSIONS_F, arr)
+
+
+def _ux_finalize_open_for_email(
+    email: str,
+    end_real: float,
+    end_demo: float,
+    bot_pl: float,
+    currency: str,
+) -> None:
+    """إغلاق أي جلسة مفتوحة لنفس البريد (تسجيل دخول جديد أو إغلاق يدوي)."""
+    if not email:
+        return
+    arr = _load_ux_sessions()
+    now = datetime.now(timezone.utc).isoformat()
+    changed = False
+    for rec in arr:
+        if not isinstance(rec, dict):
+            continue
+        if rec.get("email") != email or rec.get("ended_at") is not None:
+            continue
+        sr = float(rec.get("start_real") or 0)
+        sd = float(rec.get("start_demo") or 0)
+        er = round(float(end_real), 2)
+        ed = round(float(end_demo), 2)
+        rec["ended_at"] = now
+        rec["end_real"] = er
+        rec["end_demo"] = ed
+        rec["currency"] = currency or rec.get("currency") or "USD"
+        rec["pl_real"] = round(er - sr, 2)
+        rec["pl_demo"] = round(ed - sd, 2)
+        rec["bot_session_profit"] = round(float(bot_pl), 2)
+        changed = True
+    if changed:
+        _save_ux_sessions(arr)
+
+
+def _ux_session_open(S: dict) -> None:
+    """بعد نجاح تسجيل الدخول — رصيد البداية من أرصدة المنصة الحالية."""
+    email = (S or {}).get("email") or ""
+    if not email:
+        return
+    rec = {
+        "id": secrets.token_hex(10),
+        "email": email,
+        "started_at": datetime.now(timezone.utc).isoformat(),
+        "ended_at": None,
+        "currency": str(S.get("currency") or "USD"),
+        "sim_mode": bool(_is_session_sim_mode(S)),
+        "start_real": round(float(S.get("real_balance") or 0), 2),
+        "start_demo": round(float(S.get("demo_balance") or 0), 2),
+        "end_real": None,
+        "end_demo": None,
+        "pl_real": None,
+        "pl_demo": None,
+        "bot_session_profit": None,
+    }
+    arr = _load_ux_sessions()
+    arr.append(rec)
+    if len(arr) > 3000:
+        arr = arr[-2500:]
+    _save_ux_sessions(arr)
+    S["_ux_session_id"] = rec["id"]
+
+
+def _ux_session_close(S: dict) -> None:
+    """عند تسجيل الخروج — رصيد النهاية بعد محاولة التحديث من المنصة."""
+    if not S or not S.get("logged_in"):
+        S and S.pop("_ux_session_id", None)
+        return
+    sid = S.get("_ux_session_id")
+    email = S.get("email") or ""
+    er = round(float(S.get("real_balance") or 0), 2)
+    ed = round(float(S.get("demo_balance") or 0), 2)
+    pl_bot = round(float(S.get("session_profit") or 0), 2)
+    cur = str(S.get("currency") or "USD")
+    arr = _load_ux_sessions()
+    now = datetime.now(timezone.utc).isoformat()
+    for rec in arr:
+        if not isinstance(rec, dict):
+            continue
+        if sid and rec.get("id") != sid:
+            continue
+        if not sid and (rec.get("email") != email or rec.get("ended_at") is not None):
+            continue
+        if rec.get("ended_at") is not None:
+            continue
+        sr = float(rec.get("start_real") or 0)
+        sd = float(rec.get("start_demo") or 0)
+        rec["ended_at"] = now
+        rec["end_real"] = er
+        rec["end_demo"] = ed
+        rec["currency"] = cur
+        rec["pl_real"] = round(er - sr, 2)
+        rec["pl_demo"] = round(ed - sd, 2)
+        rec["bot_session_profit"] = pl_bot
+        break
+    _save_ux_sessions(arr)
+    S.pop("_ux_session_id", None)
+
+
+async def _ux_refresh_balances_before_logout(S: dict) -> None:
+    if not S or not S.get("client") or not QX:
+        return
+    try:
+        r, d = await _get_balances(S["client"])
+        S["real_balance"] = round(float(r), 2)
+        S["demo_balance"] = round(float(d), 2)
+    except Exception:
+        pass
+
+
+def _resolve_user_email(raw: str):
+    """مفتاح البريد في USERS (نفس السلسلة المحفوظة) مع تجاهل حالة الأحرف والفراغات."""
+    e = (raw or "").strip()
+    if not e or "@" not in e:
+        return None
+    if e in USERS:
+        return e
+    low = e.lower()
+    for k in USERS:
+        if isinstance(k, str) and k.lower() == low:
+            return k
+    return None
+
+
+_DEFAULT_QX_LOGIN_FAIL = (
+    "رفضت Quotex تسجيل الدخول. تحقق من البريد وكلمة المرور. "
+    "إذا طلبت المنصة تحققاً سيظهر هنا حقل PIN. "
+    "إن استمر الفشل: VPN أو شبكة أخرى (حظر IP أو Cloudflare)."
+)
+
+
+def _user_display_id(email: str) -> int:
+    """نفس معرّف العرض في /api/status."""
+    if not email:
+        return 0
+    return abs(hash(email)) % 90_000_000 + 10_000_000
+
+
+def _notify_telegram_new_registration(email: str, name: str, registered_at: str) -> None:
+    """يرسل إلى قناة تيليجرام عند طلب انضمام جديد. يتطلب TELEGRAM_BOT_TOKEN و TELEGRAM_CHANNEL_ID."""
+    bot_token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+    channel_id = os.getenv("TELEGRAM_CHANNEL_ID", "").strip()
+    if not bot_token or not channel_id:
+        return
+    try:
+        uid = _user_display_id(email)
+        text = (
+            "🔔 <b>طلب انضمام جديد — NEXORA</b>\n\n"
+            f"📧 <b>البريد:</b> {html.escape(email)}\n"
+            f"👤 <b>الاسم:</b> {html.escape(name or '—')}\n"
+            f"🆔 <b>معرف الحساب:</b> <code>{uid}</code>\n"
+            f"🕐 <b>وقت الطلب:</b> {html.escape(registered_at)}"
+        )
+        data = urllib.parse.urlencode(
+            {"chat_id": channel_id, "text": text, "parse_mode": "HTML"}
+        ).encode("utf-8")
+        req = urllib.request.Request(
+            f"https://api.telegram.org/bot{bot_token}/sendMessage",
+            data=data,
+            method="POST",
+            headers={"Content-Type": "application/x-www-form-urlencoded; charset=utf-8"},
+        )
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            if resp.status != 200:
+                log.warning("Telegram: HTTP %s", resp.status)
+    except Exception as e:
+        log.warning("فشل إشعار تيليجرام: %s", e)
+
+
 # ── PIN ────────────────────────────────────────────────────────────────────────
 _pin_queues: dict = {}
 
@@ -569,18 +1295,68 @@ def new_session(email=""):
         "candle_source":  "",   # HUSAAM_EMA10: مصدر الشموع للعرض
         "status_msg":     "",   # رسالة للمشترك
         "_last_bal_sync_ts": 0.0,
+        "_no_bot_since":  0.0,  # وقت آخر فترة بدون تشغيل البوت
         "login_error":    "",   # فشل connect بعد إرسال PIN (للعرض بدل مهلة صامتة)
-        "login_pending":  False,  # مهمة Quotex تعمل في الخلفية (تفادياً لـ 504 من Cloudflare/Nginx)
-        "_login_gen":     0,
     }
 
 def _is_session_sim_mode(S: dict) -> bool:
-    # المحاكاة: بدون Quotex، أو قبل اكتمال الدخول (حتى لا يُعرض «جاهز» أثناء connect).
+    # المحاكاة تكون فعّالة إذا pyquotex غير متاحة أو لا يوجد client متصل للجلسة.
     if not QX:
         return True
+    return not bool(S and S.get("client"))
+
+
+def _touch_no_bot_timer(S: dict) -> None:
+    """يضبط مؤقت الخمول عندما يكون المستخدم مسجّلاً دخوله لكن البوت غير شغّال."""
     if not S or not S.get("logged_in"):
-        return True
-    return not bool(S.get("client"))
+        return
+    if S.get("running"):
+        S["_no_bot_since"] = 0.0
+        return
+    if float(S.get("_no_bot_since", 0.0) or 0.0) <= 0:
+        S["_no_bot_since"] = time.time()
+
+
+def _auto_logout_if_no_bot_too_long(S: dict) -> bool:
+    """تسجيل خروج تلقائي بعد ساعة خمول بدون تشغيل البوت."""
+    if not S or not S.get("logged_in"):
+        return False
+    if S.get("running"):
+        S["_no_bot_since"] = 0.0
+        return False
+    _touch_no_bot_timer(S)
+    since = float(S.get("_no_bot_since", 0.0) or 0.0)
+    if since <= 0:
+        return False
+    if (time.time() - since) < float(NO_BOT_AUTO_LOGOUT_SEC):
+        return False
+
+    msg = "تم تسجيل خروجك تلقائياً بعد ساعة بدون تشغيل البوت. سجّل الدخول من جديد."
+    S["status_msg"] = ""
+    S["running"] = False
+    try:
+        _ux_session_close(S)
+    except Exception:
+        pass
+    if S.get("client"):
+        try:
+            run_async_for(S.get("email", "_"), _close(S["client"]), 5)
+        except Exception:
+            pass
+    S.update({
+        "logged_in": False,
+        "needs_pin": False,
+        "trades": [],
+        "wins": 0,
+        "losses": 0,
+        "session_profit": 0.0,
+        "current_trade": None,
+        "client": None,
+        "login_error": msg,
+        "_no_bot_since": 0.0,
+    })
+    log.info("🕒 Auto-logout (no bot activity): %s", S.get("email") or "_")
+    return True
 
 def get_session(token) -> dict:
     if not token: return None
@@ -633,6 +1409,16 @@ class ApproveReq(BaseModel):
     action: str
     note: str = ""
 
+class AdminSettingsReq(BaseModel):
+    admin_token: str
+    demo_max_trades_per_day: int
+
+
+class AdminMaintenanceReq(BaseModel):
+    admin_token: str
+    enabled: bool
+    activation_password: str = ""
+
 # ── Async Loop ────────────────────────────────────────────────────────────────
 _loop = asyncio.new_event_loop()
 threading.Thread(target=_loop.run_forever, daemon=True).start()
@@ -643,6 +1429,23 @@ def run_async(coro, timeout=30):
 # ── loop مستقل لكل مشترك — يمنع تعليق الكل بسبب مشترك واحد ──────────────────
 _session_loops: dict = {}
 _session_loop_lock = threading.Lock()
+# قفل عام (اختياري NEXORA_SERIALIZE_QUOTEX_CANDLE_FETCH=global) — كان يسبب طوابير بين الحسابات ومهلة run_async_for.
+_QUOTEX_MINUTE_FETCH_LOCK = threading.Lock()
+_quotex_minute_lock_by_client: dict = {}
+_quotex_minute_lock_by_client_guard = threading.Lock()
+
+
+def _get_quotex_minute_fetch_lock_for_client(client):
+    """قفل لكل عميل Quotex — حسابان لا ينتظران بعضهما عند جلب الشموع."""
+    if client is None:
+        return _QUOTEX_MINUTE_FETCH_LOCK
+    key = id(client)
+    with _quotex_minute_lock_by_client_guard:
+        lk = _quotex_minute_lock_by_client.get(key)
+        if lk is None:
+            lk = threading.Lock()
+            _quotex_minute_lock_by_client[key] = lk
+        return lk
 
 def get_session_loop(email: str):
     with _session_loop_lock:
@@ -651,10 +1454,6 @@ def get_session_loop(email: str):
             threading.Thread(target=loop.run_forever, daemon=True, name=f"loop-{email}").start()
             _session_loops[email] = loop
         return _session_loops[email]
-
-# إغلاق عميل Quotex قد يتجاوز 5ث إذا علق WebSocket (تسجيل خروج / إعادة دخول / حذف من الأدمن)
-_CLOSE_CLIENT_TIMEOUT_SEC = 20
-
 
 def run_async_for(email: str, coro, timeout=30):
     loop = get_session_loop(email)
@@ -752,7 +1551,7 @@ def calc_williams(closes, period=14):
     if high == low: return -50.0
     return round((high-closes[-1])/(high-low)*-100, 2)
 
-# ── استراتيجية حسام EMA10 (شموع مغلقة 1m فقط، EMA10):
+# ── استراتيجية NEXORA EMA10 (شموع مغلقة 1m فقط، EMA10):
 #    CALL (ترند صاعد): سياق فوق EMA → حمراء إشارية على EMA → خضراء تأكيد → CALL
 #    PUT  (ترند هابط): سياق تحت EMA → خضراء إشارية على EMA → حمراء تأكيد → PUT
 _HUSAAM_EMA10_PERIOD = 10
@@ -771,17 +1570,30 @@ _HUSAAM_EMA10_MAX_SIGN_FLIPS = 8
 _HUSAAM_EMA10_FLAT_LOOKBACK = 10
 _HUSAAM_EMA10_MAX_FLAT_SLOPE_PCT = 0.00006
 _HUSAAM_EMA10_SCORE = 10
+_HUSAAM_EMA10_GENERAL_TREND_EMA = 34
+_HUSAAM_EMA10_GENERAL_TREND_LOOKBACK = 12
+_HUSAAM_EMA10_GENERAL_TREND_MIN_SLOPE_PCT = 0.00022
 # شارت Quotex دقيقة — الإشارة بعد إغلاق الشمعة على EMA وليس أثناء تكوّنها
 _HUSAAM_EMA10_CANDLE_SECS = 60
 # تخزين نتيجة get_candles ناجحة (ثوانٍ) — يقلل الضغط ويحافظ على مصدر واحد مع الشارت
 _HUSAAM_QUOTEX_CACHE_SEC = 90.0
-# مهلة run_async_for لجلب الشموع (بعد v2 قصير + get_candles قصير لكل دورة)
-_HUSAAM_QUOTEX_FETCH_TIMEOUT_SEC = 55.0
+# مهلة run_async_for لجلب الشموع (بعد v2 قصير + get_candles قصير لكل دورة) — يُزاد عبر HUSAAM_QUOTEX_FETCH_TIMEOUT_SEC
+_HUSAAM_QUOTEX_FETCH_TIMEOUT_SEC = 75.0
 
-# ── استراتيجية حسام الخاصة (MACD + هستوغرام، شموع 1m مغلقة) ──
+# ── استراتيجية NEXORA الخاصة (MACD + هستوغرام، شموع 1m مغلقة) ──
 _HUSAAM_PRIVATE_MIN_BARS = 55
 _HUSAAM_PRIVATE_TREND_EMA = 21
 _HUSAAM_PRIVATE_SCORE = 10
+
+# ── استراتيجية LIVE (لأسواق Live): أكثر نشاطاً مع فلترة اتجاه/زخم ──
+_LIVE_MIN_BARS = 200
+_LIVE_FAST_EMA = 9
+_LIVE_SLOW_EMA = 21
+_LIVE_TREND_EMA = 55
+_LIVE_SCORE = 8
+_LIVE_TOUCH_TOL_PCT = 0.0012
+_LIVE_SR_LOOKBACK = 80
+_LIVE_SR_NEAR_PCT = 0.0015
 
 # ── HUSAAM: RSI + MACD (تآزر) + مدى شمعة vs وسيط + نافذة UTC — توازن بين جودة وعدد الإشارات ──
 _HUSAAM_STRICT_SCORE = 10
@@ -885,7 +1697,7 @@ def _analyze_husaam_strict(candles) -> str:
         macd_line, signal_line, hist, n
     ):
         log.info(
-            "🏆 HUSAAM CALL | RSI=%s MACD confirm | range=%.6f med=%.6f (min=%.6f)",
+            "🏆 NEXORA CALL | RSI=%s MACD confirm | range=%.6f med=%.6f (min=%.6f)",
             rsi,
             last_r,
             med_r,
@@ -896,7 +1708,7 @@ def _analyze_husaam_strict(candles) -> str:
         macd_line, signal_line, hist, n
     ):
         log.info(
-            "🏆 HUSAAM PUT | RSI=%s MACD confirm | range=%.6f med=%.6f (min=%.6f)",
+            "🏆 NEXORA PUT | RSI=%s MACD confirm | range=%.6f med=%.6f (min=%.6f)",
             rsi,
             last_r,
             med_r,
@@ -1009,6 +1821,41 @@ def _husaam_ema10_reject_flat_or_choppy(closes, p: int, ent: int) -> bool:
     return False
 
 
+def _husaam_ema10_general_trend(closes) -> str:
+    """
+    اتجاه عام محافظ:
+    - up: ميل EMA طويل صاعد + أغلب الإغلاقات الأخيرة فوقه
+    - down: ميل EMA طويل هابط + أغلب الإغلاقات الأخيرة تحته
+    - side: غير واضح (يمنع الدخول عكس/ضد السياق)
+    """
+    p = _HUSAAM_EMA10_GENERAL_TREND_EMA
+    lb = _HUSAAM_EMA10_GENERAL_TREND_LOOKBACK
+    if len(closes) < p + lb + 2:
+        return "side"
+    ema_now = calc_ema(closes, p)
+    ema_prev = calc_ema(closes[:-lb], p)
+    if ema_now <= 0 or ema_prev <= 0:
+        return "side"
+    slope_pct = (ema_now - ema_prev) / ema_prev
+    above = 0
+    below = 0
+    start = len(closes) - lb
+    for i in range(start, len(closes)):
+        ema_i = _husaam_ema10_ema_at(closes, i, p)
+        if ema_i <= 0:
+            return "side"
+        if closes[i] >= ema_i:
+            above += 1
+        else:
+            below += 1
+    min_side = max(7, int(lb * 0.6))
+    if slope_pct >= _HUSAAM_EMA10_GENERAL_TREND_MIN_SLOPE_PCT and above >= min_side:
+        return "up"
+    if slope_pct <= -_HUSAAM_EMA10_GENERAL_TREND_MIN_SLOPE_PCT and below >= min_side:
+        return "down"
+    return "side"
+
+
 def _analyze_husaam_ema10_signal(candles) -> tuple:
     """
     CALL: ترند صاعد — حمراء إشارية على EMA ثم خضراء تأكيد (شموع مغلقة).
@@ -1050,7 +1897,6 @@ def _analyze_husaam_ema10_signal(candles) -> tuple:
     ema_ent = _husaam_ema10_ema_at(closes, ent, p)
     if ema_sig <= 0 or ema_ent <= 0:
         return "wait", 0
-
     close_tol = max(ema_sig * _HUSAAM_EMA10_CLOSE_TOL_PCT, 1e-12)
     touch_tol = max(ema_sig * _HUSAAM_EMA10_LOW_TOUCH_PCT, 1e-12)
     break_tol = max(ema_sig * (_HUSAAM_EMA10_BREAKDOWN_EXTRA_PCT + _HUSAAM_EMA10_CLOSE_TOL_PCT * 0.5), 1e-12)
@@ -1085,7 +1931,7 @@ def _analyze_husaam_ema10_signal(candles) -> tuple:
         if _husaam_ema10_reject_flat_or_choppy(closes, p, ent):
             return "wait", 0
         log.debug(
-            "📌 HUSAAM_EMA10 CALL red@sig=%s green@ent=%s ema_sig=%.5f ema_ent=%.5f",
+            "📌 NEXORA_EMA10 CALL red@sig=%s green@ent=%s ema_sig=%.5f ema_ent=%.5f",
             sig,
             ent,
             ema_sig,
@@ -1122,7 +1968,7 @@ def _analyze_husaam_ema10_signal(candles) -> tuple:
     if _husaam_ema10_reject_flat_or_choppy(closes, p, ent):
         return "wait", 0
     log.debug(
-        "📌 HUSAAM_EMA10 PUT green@sig=%s red@ent=%s ema_sig=%.5f ema_ent=%.5f",
+        "📌 NEXORA_EMA10 PUT green@sig=%s red@ent=%s ema_sig=%.5f ema_ent=%.5f",
         sig,
         ent,
         ema_sig,
@@ -1133,7 +1979,7 @@ def _analyze_husaam_ema10_signal(candles) -> tuple:
 
 def _analyze_husaam_private_signal(candles) -> tuple:
     """
-    استراتيجية حسام الخاصة — MACD + هستوغرام على شموع 1m مغلقة فقط.
+    استراتيجية NEXORA الخاصة — MACD + هستوغرام على شموع 1m مغلقة فقط.
     هابط: تحت EMA + هستوغرام < 0 + أول شمعة خضراء بالهستوغرام + شمعة سعر خضراء + الخطان فوق الهستو → PUT.
     صاعد: فوق EMA + هستوغرام > 0 + 6 شموع خضراء صاعدة + شمعة سعر حمراء + الخطان تحت الهستو → CALL.
     """
@@ -1163,7 +2009,7 @@ def _analyze_husaam_private_signal(candles) -> tuple:
                 break
         if ok and macd_line[i] < hist[i] and signal_line[i] < hist[i]:
             log.debug(
-                "📌 HUSAAM_PRIVATE CALL i=%s hist=%.8f macd=%.8f sig=%.8f",
+                "📌 NEXORA_PRIVATE CALL i=%s hist=%.8f macd=%.8f sig=%.8f",
                 i,
                 hist[i],
                 macd_line[i],
@@ -1181,7 +2027,7 @@ def _analyze_husaam_private_signal(candles) -> tuple:
             and signal_line[i] > hist[i]
         ):
             log.debug(
-                "📌 HUSAAM_PRIVATE PUT i=%s hist=%.8f macd=%.8f sig=%.8f",
+                "📌 NEXORA_PRIVATE PUT i=%s hist=%.8f macd=%.8f sig=%.8f",
                 i,
                 hist[i],
                 macd_line[i],
@@ -1192,12 +2038,170 @@ def _analyze_husaam_private_signal(candles) -> tuple:
     return "wait", 0
 
 
+def _live_price_action_bullish(kit, i: int) -> bool:
+    if i < 1:
+        return False
+    c0 = kit[i]
+    p1 = kit[i - 1]
+    o = float(c0["open"]); h = float(c0["high"]); l = float(c0["low"]); cl = float(c0["close"])
+    po = float(p1["open"]); pc = float(p1["close"])
+    rng = max(h - l, 1e-12)
+    body = abs(cl - o)
+    # Bullish engulfing
+    if pc < po and cl > o and cl >= po and o <= pc:
+        return True
+    # Hammer
+    lower = min(o, cl) - l
+    upper = h - max(o, cl)
+    if body > 0 and lower >= body * 1.8 and upper <= body * 0.8 and cl >= o:
+        return True
+    return body / rng >= 0.55 and cl > o
+
+
+def _live_price_action_bearish(kit, i: int) -> bool:
+    if i < 1:
+        return False
+    c0 = kit[i]
+    p1 = kit[i - 1]
+    o = float(c0["open"]); h = float(c0["high"]); l = float(c0["low"]); cl = float(c0["close"])
+    po = float(p1["open"]); pc = float(p1["close"])
+    rng = max(h - l, 1e-12)
+    body = abs(cl - o)
+    # Bearish engulfing
+    if pc > po and cl < o and cl <= po and o >= pc:
+        return True
+    # Shooting star
+    upper = h - max(o, cl)
+    lower = min(o, cl) - l
+    if body > 0 and upper >= body * 1.8 and lower <= body * 0.8 and cl <= o:
+        return True
+    return body / rng >= 0.55 and cl < o
+
+
+def _analyze_live_core(candles) -> dict:
+    mode = str(os.getenv("LIVE_STRATEGY_MODE", "advanced") or "advanced").strip().lower()
+    kit = _candles_ohlc_kit(_ema10_closed_only(candles))
+    if len(kit) < _LIVE_MIN_BARS:
+        return {"qualified_dir": "wait", "qualified_score": 0, "soft_dir": "wait", "soft_score": 0, "confidence": 0}
+    kit = kit[-_LIVE_MIN_BARS:]
+    closes = [float(c["close"]) for c in kit]
+    highs = [float(c["high"]) for c in kit]
+    lows = [float(c["low"]) for c in kit]
+    if len(closes) < _LIVE_MIN_BARS:
+        return {"qualified_dir": "wait", "qualified_score": 0, "soft_dir": "wait", "soft_score": 0, "confidence": 0}
+    i = len(kit) - 1
+    j = i - 1
+    if j < 1:
+        return {"qualified_dir": "wait", "qualified_score": 0, "soft_dir": "wait", "soft_score": 0, "confidence": 0}
+
+    ema10 = _husaam_ema10_ema_at(closes, i, 10)
+    ema20 = _husaam_ema10_ema_at(closes, i, 20)
+    ema50 = _husaam_ema10_ema_at(closes, i, 50)
+    if min(ema10, ema20, ema50) <= 0:
+        return {"qualified_dir": "wait", "qualified_score": 0, "soft_dir": "wait", "soft_score": 0, "confidence": 0}
+
+    macd_line, signal_line, hist = calc_macd_series(closes)
+    if macd_line is None:
+        return {"qualified_dir": "wait", "qualified_score": 0, "soft_dir": "wait", "soft_score": 0, "confidence": 0}
+    rsi = calc_rsi(closes)
+    price = float(closes[i])
+
+    sr_lb = max(30, min(_LIVE_SR_LOOKBACK, len(kit)))
+    support = min(lows[-sr_lb:])
+    resistance = max(highs[-sr_lb:])
+    near_support = support > 0 and abs(price - support) / support <= _LIVE_SR_NEAR_PCT
+    near_resistance = resistance > 0 and abs(price - resistance) / resistance <= _LIVE_SR_NEAR_PCT
+
+    macd_buy = macd_line[i] > signal_line[i] and macd_line[i] > 0 and hist[i] > 0
+    macd_sell = macd_line[i] < signal_line[i] and macd_line[i] < 0 and hist[i] < 0
+    rsi_buy = 45 <= rsi <= 70
+    rsi_sell = 30 <= rsi <= 55
+    ema_buy = price > ema10 > ema20 > ema50
+    ema_sell = price < ema10 < ema20 < ema50
+    pa_buy = _live_price_action_bullish(kit, i)
+    pa_sell = _live_price_action_bearish(kit, i)
+
+    if mode == "ema_support_bounce":
+        buy_score = int((price > ema10 > ema50)) + int(rsi_buy) + int(near_support)
+        sell_score = int((price < ema10 < ema50)) + int(rsi_sell) + int(near_resistance)
+    elif mode == "macd_crossover":
+        buy_score = int(macd_line[i] > signal_line[i]) + int(hist[i] > 0) + int(macd_line[i] > 0)
+        sell_score = int(macd_line[i] < signal_line[i]) + int(hist[i] < 0) + int(macd_line[i] < 0)
+    elif mode == "price_action_sr":
+        buy_score = int(pa_buy) + int(near_support) + int(price >= ema20)
+        sell_score = int(pa_sell) + int(near_resistance) + int(price <= ema20)
+    else:
+        # advanced الافتراضية: 4/5 مطلوبة
+        buy_score = int(macd_buy) + int(rsi_buy) + int(ema_buy) + int(near_support) + int(pa_buy)
+        sell_score = int(macd_sell) + int(rsi_sell) + int(ema_sell) + int(near_resistance) + int(pa_sell)
+
+    soft_dir = "wait"
+    soft_score = 0
+    if buy_score > sell_score:
+        soft_dir, soft_score = "call", int(buy_score)
+    elif sell_score > buy_score:
+        soft_dir, soft_score = "put", int(sell_score)
+
+    qualified_dir = "wait"
+    qualified_score = 0
+    confidence = 0
+    if mode == "advanced":
+        if buy_score >= 4 and sell_score >= 4:
+            qualified_dir = "wait"
+        elif buy_score >= 4 and buy_score > sell_score:
+            confidence = int((buy_score / 5.0) * 100.0)
+            if confidence >= 70:
+                qualified_dir = "call"
+                qualified_score = int(buy_score + _LIVE_SCORE)
+        elif sell_score >= 4 and sell_score > buy_score:
+            confidence = int((sell_score / 5.0) * 100.0)
+            if confidence >= 70:
+                qualified_dir = "put"
+                qualified_score = int(sell_score + _LIVE_SCORE)
+    else:
+        req_min = 2
+        max_possible = 3
+        if buy_score >= req_min and buy_score > sell_score:
+            confidence = int((buy_score / float(max_possible)) * 100.0)
+            if confidence >= 70:
+                qualified_dir = "call"
+                qualified_score = int(buy_score + _LIVE_SCORE - 1)
+        elif sell_score >= req_min and sell_score > buy_score:
+            confidence = int((sell_score / float(max_possible)) * 100.0)
+            if confidence >= 70:
+                qualified_dir = "put"
+                qualified_score = int(sell_score + _LIVE_SCORE - 1)
+
+    return {
+        "qualified_dir": qualified_dir,
+        "qualified_score": int(qualified_score),
+        "soft_dir": soft_dir,
+        "soft_score": int(soft_score),
+        "buy_score": int(buy_score),
+        "sell_score": int(sell_score),
+        "confidence": int(confidence),
+    }
+
+
+def _analyze_live_signal(candles) -> tuple:
+    core = _analyze_live_core(candles)
+    return core["qualified_dir"], int(core["qualified_score"])
+
+
+def _analyze_live_soft_candidate(candles) -> tuple:
+    core = _analyze_live_core(candles)
+    return core["soft_dir"], int(core["soft_score"])
+
+
 def analyze(candles, strategy) -> str:
     if strategy == "HUSAAM_EMA10":
         d, _ = _analyze_husaam_ema10_signal(candles)
         return d
     if strategy == "HUSAAM_PRIVATE":
         d, _ = _analyze_husaam_private_signal(candles)
+        return d
+    if strategy == "LIVE":
+        d, _ = _analyze_live_signal(candles)
         return d
     if strategy == "HUSAAM":
         return _analyze_husaam_strict(candles)
@@ -1294,7 +2298,7 @@ def analyze(candles, strategy) -> str:
         if stoch < 30 and williams < -70: cp += 2
         if stoch > 70 and williams > -30: pp += 2
 
-        log.info(f"🏆 HUSAAM: CALL={cp} PUT={pp} diff={abs(cp-pp)}")
+        log.info(f"🏆 NEXORA: CALL={cp} PUT={pp} diff={abs(cp-pp)}")
         # عتبة 6 نقاط للدخول — توازن بين الدقة والكمية
         if cp >= pp + 6: return "call"
         if pp >= cp + 6: return "put"
@@ -1333,6 +2337,8 @@ def analyze_score(candles, strategy) -> tuple:
         return _analyze_husaam_ema10_signal(candles)
     if strategy == "HUSAAM_PRIVATE":
         return _analyze_husaam_private_signal(candles)
+    if strategy == "LIVE":
+        return _analyze_live_signal(candles)
     if strategy == "HUSAAM":
         d = _analyze_husaam_strict(candles)
         return (d, _HUSAAM_STRICT_SCORE) if d != "wait" else ("wait", 0)
@@ -1476,9 +2482,258 @@ def _fallback_direction_from_candles(candles) -> tuple:
 _price_buffers: dict = {}
 # احتفاظ أطول لبناء شموع 5ث (35 شمعة ≈ 175ث جدارياً على الأقل)
 _PRICE_BUFFER_RETENTION_SEC = 1800
+
+
+def _session_price_key(email: str, asset: str) -> tuple:
+    """مفتاح تخزين تيكات المراقبة لكل حساب وزوج — لا دمج بين المشتركين."""
+    return (str(email or "").strip().lower() or "_", asset)
+
+
+def _session_ema_cache_key(email: str, asset: str) -> tuple:
+    return (str(email or "").strip().lower() or "_", asset)
 # تدفئة: تيكات للمراقبة/الواجهة فقط — لـ EMA10 لا تُستخدم في الإشارة
 _WARMUP_COLLECT_SEC = 180
 _WARMUP_COLLECT_SEC_EMA10 = 25
+
+# OANDA (Live فقط): تحليل من 100 شمعة M1 ثم تنفيذ على Quotex
+_OANDA_DEFAULT_API_URL = "https://api-fxpractice.oanda.com"
+_OANDA_DEFAULT_CANDLE_COUNT = 240
+
+
+def _oanda_live_feed_enabled() -> bool:
+    v = os.getenv("OANDA_LIVE_FEED_ENABLED", "").strip().lower()
+    if v in ("1", "true", "yes", "on"):
+        return True
+    if v in ("0", "false", "no", "off"):
+        return False
+    return bool(str(os.getenv("OANDA_API_KEY", "") or "").strip())
+
+
+def _is_otc_asset(asset: str) -> bool:
+    s = str(asset or "").strip().lower()
+    return ("_otc" in s) or ("(otc" in s)
+
+
+def _is_live_asset(asset: str) -> bool:
+    return not _is_otc_asset(asset)
+
+
+def _skip_quotex_candle_fetch_for_live_asset(asset: str) -> bool:
+    """عند LIVE+OANDA نقلل ضغط Quotex: لا حاجة لسحب history/v2 لكل زوج Live."""
+    if not (_oanda_live_feed_enabled() and _is_live_asset(asset)):
+        return False
+    v = os.getenv("LIVE_SKIP_QUOTEX_CANDLE_FETCH", "1").strip().lower()
+    return v in ("1", "true", "yes", "on")
+
+
+_OANDA_ASSET_MAP = {
+    "XAUUSD": "XAU_USD",
+    "XAGUSD": "XAG_USD",
+    "UKBRENT": "BCO_USD",
+    "BRENT": "BCO_USD",
+    "USOIL": "WTICO_USD",
+    "WTI": "WTICO_USD",
+}
+_OANDA_QUOTE_SUFFIXES = (
+    "USDT", "USDC", "BUSD", "TUSD", "DAI", "CNH",
+    "USD", "EUR", "JPY", "GBP", "AUD", "CAD", "CHF", "NZD",
+    "TRY", "SEK", "NOK", "DKK", "PLN", "ZAR", "HKD", "SGD",
+)
+
+
+def _asset_to_oanda_instrument(asset: str) -> str:
+    raw = str(asset or "").strip().upper()
+    if not raw:
+        return ""
+    raw = raw.replace("(OTC)", "").replace("_OTC", "").replace("-", "").replace(" ", "")
+    if raw in _OANDA_ASSET_MAP:
+        return _OANDA_ASSET_MAP[raw]
+    if "/" in raw:
+        p = [x for x in raw.split("/") if x]
+        if len(p) == 2:
+            return f"{p[0]}_{p[1]}"
+    if "_" in raw:
+        p = [x for x in raw.split("_") if x]
+        if len(p) == 2:
+            return f"{p[0]}_{p[1]}"
+    for q in _OANDA_QUOTE_SUFFIXES:
+        if raw.endswith(q) and len(raw) > len(q):
+            base = raw[: -len(q)]
+            if 2 <= len(base) <= 8:
+                return f"{base}_{q}"
+    return ""
+
+
+def _central_market_enabled() -> bool:
+    """طبقة سوق مركزية: زوج واحد = مغذّي واحد؛ الحسابات تقرأ فقط (بدون التحكم بستريم غيرهم)."""
+    if not QX:
+        return False
+    return os.getenv("NEXORA_CENTRAL_MARKET", "1").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+
+
+_central_rlock = threading.RLock()
+# زوج → تيكات مركزية (مراقبة / واجهة)
+_central_ticks: dict = {}
+# زوج → {t, candles, source}
+_central_candles: dict = {}
+# زوج → {stop, thread, email, client_ref}
+_central_feeders: dict = {}
+
+
+def _central_append_tick(asset: str, p: float) -> None:
+    if p <= 0 or not asset:
+        return
+    with _central_rlock:
+        lst = _central_ticks.setdefault(asset, [])
+        lst.append({"price": p, "time": time.time()})
+        cutoff = time.time() - _PRICE_BUFFER_RETENTION_SEC
+        _central_ticks[asset] = [x for x in lst if x["time"] > cutoff]
+
+
+def _central_ticks_len(asset: str) -> int:
+    with _central_rlock:
+        return len(_central_ticks.get(asset, ()))
+
+
+def _central_get_candle_snapshot(asset: str):
+    with _central_rlock:
+        return _central_candles.get(asset)
+
+
+def _central_set_candles(asset: str, rows: list) -> None:
+    with _central_rlock:
+        _central_candles[asset] = {
+            "t": time.time(),
+            "candles": list(rows) if rows else [],
+            "source": "quotex",
+        }
+
+
+def _central_detach_client(client) -> None:
+    """عند إغلاق عميل: أوقف أي مغذّي يعتمد عليه."""
+    if client is None:
+        return
+    with _central_rlock:
+        for _asset, fd in list(_central_feeders.items()):
+            try:
+                cr = fd.get("client_ref")
+                if cr and cr() is client:
+                    fd["stop"].set()
+            except Exception:
+                pass
+
+
+async def _collect_one_tick_to_central_async(client, asset: str) -> float:
+    """تيك واحد إلى المخزن المركزي (على loop المزوّد)."""
+    keys = _quotex_tick_keys(client, asset)
+    try:
+        for _ in range(12):
+            for key in keys:
+                try:
+                    price = await client.get_realtime_price(key)
+                except Exception:
+                    continue
+                p = _parse_rt_price(price)
+                if p > 0:
+                    _central_append_tick(asset, p)
+                    return p
+            p2 = _price_from_realtime_candles_tuple(client)
+            if p2 > 0:
+                _central_append_tick(asset, p2)
+                return p2
+            await asyncio.sleep(0.12)
+    except Exception:
+        pass
+    return 0.0
+
+
+def _central_feeder_thread_main(asset: str, email: str, client_ref, stop_ev: threading.Event):
+    """خيط واحد لكل زوج: stream + تيكات + تجديد شموع 1m دوري."""
+    _cint = float(os.getenv("NEXORA_CENTRAL_CANDLE_REFRESH_SEC", "50") or 50)
+    _cint = max(25.0, min(_cint, 300.0))
+    _fto = float(
+        os.getenv(
+            "HUSAAM_QUOTEX_FETCH_TIMEOUT_SEC",
+            str(_HUSAAM_QUOTEX_FETCH_TIMEOUT_SEC),
+        )
+        or _HUSAAM_QUOTEX_FETCH_TIMEOUT_SEC
+    )
+    _fto = max(30.0, min(_fto, 180.0))
+    stream_started = False
+    last_candle_t = 0.0
+    while not stop_ev.is_set():
+        c = client_ref()
+        if c is None:
+            log.info("📡 سوق مركزي: إيقاف مغذّي %s (لا عميل)", asset)
+            break
+        try:
+            if not stream_started:
+                run_async_for(email, _start_price_stream(c, asset), 25)
+                stream_started = True
+        except Exception:
+            stream_started = False
+        try:
+            run_async_for(email, _collect_one_tick_to_central_async(c, asset), 14)
+        except Exception:
+            pass
+        now = time.time()
+        if now - last_candle_t >= _cint:
+            if not _skip_quotex_candle_fetch_for_live_asset(asset):
+                try:
+                    with _get_quotex_minute_fetch_lock_for_client(c):
+                        lst = run_async_for(
+                            email,
+                            _fetch_quotex_minute_candles_async(c, asset),
+                            _fto,
+                        )
+                    if lst:
+                        _central_set_candles(asset, lst)
+                except Exception as e:
+                    log.debug("سوق مركزي شموع %s: %s", asset, e)
+            last_candle_t = now
+        time.sleep(0.4)
+    with _central_rlock:
+        fd = _central_feeders.get(asset)
+        if fd and fd.get("stop") is stop_ev:
+            _central_feeders.pop(asset, None)
+
+
+def _central_ensure_feeder(asset: str, email: str, client) -> None:
+    if not _central_market_enabled() or not QX or not client or not asset:
+        return
+    with _central_rlock:
+        fd = _central_feeders.get(asset)
+        if fd:
+            th = fd.get("thread")
+            cr = fd.get("client_ref")
+            if th and th.is_alive() and cr and cr() is not None:
+                return
+            try:
+                fd.get("stop", threading.Event()).set()
+            except Exception:
+                pass
+            _central_feeders.pop(asset, None)
+        stop_ev = threading.Event()
+        cref = weakref.ref(client)
+        t = threading.Thread(
+            target=_central_feeder_thread_main,
+            args=(asset, email, cref, stop_ev),
+            daemon=True,
+            name=f"nexora-md-{asset}",
+        )
+        _central_feeders[asset] = {
+            "stop": stop_ev,
+            "thread": t,
+            "email": email,
+            "client_ref": cref,
+        }
+    t.start()
+    log.info("📡 سوق مركزي: مغذّي %s يعمل عبر حساب %s", asset, email)
 
 
 def _quotex_tick_keys(client, asset: str):
@@ -1522,6 +2777,58 @@ async def _ensure_quotex_assets(client):
         log.debug("get_all_assets: %s", e)
 
 
+def _quotex_instrument_row_tradable_open(row) -> bool:
+    """صف أداة pyquotex: معرّف غير فارغ (قابل للتداول) والعمود 14 = مفتوح بالمنصة."""
+    if not isinstance(row, (list, tuple)) or len(row) < 15:
+        return False
+    if str(row[0] or "").strip() == "":
+        return False
+    o = row[14]
+    if o is True or o == 1:
+        return True
+    if o is False or o == 0 or o is None:
+        return False
+    if isinstance(o, str):
+        return o.strip().lower() in ("1", "true", "yes", "open")
+    try:
+        return float(o) != 0.0
+    except (TypeError, ValueError):
+        return bool(o)
+
+
+async def _fetch_open_assets_for_ui(client):
+    """أزواج مفتوحة على Quotex فقط + نسب دفع (عمود 1M) إن وُجدت."""
+    await _ensure_quotex_assets(client)
+    if not hasattr(client, "get_instruments"):
+        return [], [], [], {}
+    instruments = await client.get_instruments()
+    if not instruments:
+        return [], [], [], {}
+    otc, live, merged = [], [], []
+    payouts = {}
+    seen = set()
+    for i in instruments:
+        if not _quotex_instrument_row_tradable_open(i):
+            continue
+        sym = str(i[1]).strip()
+        if not sym or sym in seen:
+            continue
+        seen.add(sym)
+        merged.append(sym)
+        if sym.endswith("_otc") or "_otc" in sym:
+            otc.append(sym)
+        else:
+            live.append(sym)
+        try:
+            payouts[sym] = int(round(float(i[-9])))
+        except (TypeError, ValueError, OverflowError, IndexError):
+            pass
+    otc.sort()
+    live.sort()
+    merged.sort()
+    return otc, live, merged, payouts
+
+
 async def _start_price_stream(client, asset):
     """يشترك في التيكات بدون انتظار start_realtime_price (حلقة لا نهائية في المكتبة + مهلة قصيرة كانت تُلغي الاشتراك)."""
     try:
@@ -1529,7 +2836,9 @@ async def _start_price_stream(client, asset):
             return
         keys = _quotex_tick_keys(client, asset)
         k0 = keys[0]
-        client.start_candles_stream(k0, 0)
+        # pyquotex Stable.period_default=60؛ الفترة 0 تُرسل للسيرفر كاشتراك غير صالح → لا تيكات ولا شموع حية.
+        stream_period = max(1, int(os.getenv("QUOTEX_STREAM_PERIOD_SEC", str(_HUSAAM_EMA10_CANDLE_SECS)) or _HUSAAM_EMA10_CANDLE_SECS))
+        client.start_candles_stream(k0, stream_period)
         # المكتبة تُلحق التيك بـ message[0][0]؛ إن اختلف المفتاح عن المشترك يحدث KeyError ويُبتلع — نُهيئ كل المفاتيح
         api = getattr(client, "api", None)
         if api is not None:
@@ -1541,14 +2850,15 @@ async def _start_price_stream(client, asset):
         log.warning("start_candles_stream(%s): %s", asset, e)
 
 
-def _append_price_tick(asset: str, p: float) -> None:
+def _append_price_tick(email: str, asset: str, p: float) -> None:
     if p <= 0:
         return
-    if asset not in _price_buffers:
-        _price_buffers[asset] = []
-    _price_buffers[asset].append({"price": p, "time": time.time()})
+    key = _session_price_key(email, asset)
+    if key not in _price_buffers:
+        _price_buffers[key] = []
+    _price_buffers[key].append({"price": p, "time": time.time()})
     cutoff = time.time() - _PRICE_BUFFER_RETENTION_SEC
-    _price_buffers[asset] = [x for x in _price_buffers[asset] if x["time"] > cutoff]
+    _price_buffers[key] = [x for x in _price_buffers[key] if x["time"] > cutoff]
 
 
 def _price_from_realtime_candles_tuple(client) -> float:
@@ -1565,7 +2875,7 @@ def _price_from_realtime_candles_tuple(client) -> float:
     return 0.0
 
 
-async def _collect_price_async(client, asset) -> float:
+async def _collect_price_async(client, asset, email: str = "") -> float:
     """يقرأ التيك من أي مفتاح مطابق (رقم أو رمز) مع انتظار قصير بين المحاولات."""
     keys = _quotex_tick_keys(client, asset)
     try:
@@ -1577,11 +2887,11 @@ async def _collect_price_async(client, asset) -> float:
                     continue
                 p = _parse_rt_price(price)
                 if p > 0:
-                    _append_price_tick(asset, p)
+                    _append_price_tick(email, asset, p)
                     return p
             p2 = _price_from_realtime_candles_tuple(client)
             if p2 > 0:
-                _append_price_tick(asset, p2)
+                _append_price_tick(email, asset, p2)
                 return p2
             await asyncio.sleep(0.2)
     except Exception:
@@ -1592,17 +2902,18 @@ def _collect_price(client, asset, email: str = "") -> float:
     """جلب سعر حي — يجب تشغيله على نفس event loop الخاصة بجلسة Quotex (connect)."""
     try:
         if email and QX:
-            p = run_async_for(email, _collect_price_async(client, asset), timeout=12)
+            p = run_async_for(email, _collect_price_async(client, asset, email), timeout=12)
         else:
-            p = run_async(_collect_price_async(client, asset), timeout=12)
+            p = run_async(_collect_price_async(client, asset, email), timeout=12)
         return p or 0
     except Exception:
         return 0
 
-def _build_candles(asset, candle_secs=5) -> list:
-    if asset not in _price_buffers or len(_price_buffers[asset]) < 10:
+def _build_candles(email: str, asset, candle_secs=5) -> list:
+    key = _session_price_key(email, asset)
+    if key not in _price_buffers or len(_price_buffers[key]) < 10:
         return []
-    prices = sorted(_price_buffers[asset], key=lambda x: x["time"])
+    prices = sorted(_price_buffers[key], key=lambda x: x["time"])
     candles, buf, t0 = [], [], prices[0]["time"] - (prices[0]["time"] % candle_secs)
     for e in prices:
         ct = e["time"] - (e["time"] % candle_secs)
@@ -1617,8 +2928,155 @@ def _build_candles(asset, candle_secs=5) -> list:
     log.debug("📊 %s شمعة من %s سعر", len(candles), len(prices))
     return candles
 
-_husaam_api_candle_cache: dict = {}  # asset -> {t, candles, source: "quotex"}
-_husaam_ema10_analysis_log_ts: dict = {}  # asset -> وقت آخر log تفصيلي (تخفيف تكرار الكاش)
+_husaam_api_candle_cache: dict = {}  # (email, asset) -> {t, candles, source: "quotex"}
+_husaam_ema10_analysis_log_ts: dict = {}  # (email, asset) -> وقت آخر log تفصيلي (تخفيف تكرار الكاش)
+_husaam_ema10_pipeline_log_ts: dict = {}  # (asset,current_asset) -> آخر وقت log pipeline
+_husaam_micro_candle_cache: dict = {}  # (email, asset, period) -> {t, candles}
+_husaam_last_fetch_ts: dict = {}  # (email, asset) -> آخر وقت محاولة fetch من Quotex
+_oanda_candle_cache: dict = {}  # asset -> {t, candles, instrument}
+_oanda_last_fetch_ts: dict = {}  # asset -> آخر وقت محاولة fetch من OANDA
+
+
+def _parse_oanda_time_to_ts(v) -> float:
+    s = str(v or "").strip()
+    if not s:
+        return 0.0
+    try:
+        if s.endswith("Z"):
+            s = s[:-1] + "+00:00"
+        return datetime.fromisoformat(s).timestamp()
+    except Exception:
+        return 0.0
+
+
+def _fetch_oanda_m1_candles(asset: str, count: int = _OANDA_DEFAULT_CANDLE_COUNT) -> tuple:
+    """
+    يجلب شموع M1 من OANDA.
+    يعيد (rows, instrument).
+    """
+    api_key = str(os.getenv("OANDA_API_KEY", "") or "").strip()
+    if not api_key:
+        return [], ""
+    instrument = _asset_to_oanda_instrument(asset)
+    if not instrument:
+        return [], ""
+    base_url = str(os.getenv("OANDA_API_URL", _OANDA_DEFAULT_API_URL) or _OANDA_DEFAULT_API_URL).strip().rstrip("/")
+    timeout_sec = float(os.getenv("OANDA_HTTP_TIMEOUT_SEC", "8") or 8)
+    timeout_sec = max(3.0, min(timeout_sec, 30.0))
+    c = max(40, min(int(count or _OANDA_DEFAULT_CANDLE_COUNT), 500))
+    q = urllib.parse.urlencode({"price": "M", "granularity": "M1", "count": str(c)})
+    url = f"{base_url}/v3/instruments/{urllib.parse.quote(instrument, safe='')}/candles?{q}"
+    req = urllib.request.Request(
+        url=url,
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Accept": "application/json",
+            "User-Agent": "NEXORA-TRADE/1.0",
+        },
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout_sec) as resp:
+            raw = resp.read().decode("utf-8", errors="ignore")
+        data = json.loads(raw) if raw else {}
+    except Exception as e:
+        _iv = float(os.getenv("OANDA_WARN_LOG_INTERVAL_SEC", "15") or 15)
+        _iv = max(5.0, min(_iv, 120.0))
+        _k = f"fetch:{instrument}"
+        _tn = time.time()
+        if _tn - float(_oanda_warn_log_ts.get(_k, 0.0) or 0.0) >= _iv:
+            log.warning("OANDA fetch failed (%s): %s", instrument, e)
+            _oanda_warn_log_ts[_k] = _tn
+        return [], instrument
+    out = []
+    for cnd in data.get("candles") or []:
+        if not isinstance(cnd, dict):
+            continue
+        if cnd.get("complete") is False:
+            continue
+        mid = cnd.get("mid") or {}
+        try:
+            o = float(mid.get("o", 0) or 0)
+            h = float(mid.get("h", 0) or 0)
+            l = float(mid.get("l", 0) or 0)
+            cl = float(mid.get("c", 0) or 0)
+        except (TypeError, ValueError):
+            continue
+        if cl <= 0:
+            continue
+        hi = max(o, h, l, cl)
+        lo = min(o, h, l, cl)
+        ts = _parse_oanda_time_to_ts(cnd.get("time"))
+        row = {"open": o, "high": hi, "low": lo, "close": cl}
+        if ts > 0:
+            row["time"] = ts
+        out.append(row)
+    out = _sort_candles_by_time(out)
+    return out, instrument
+
+
+def _get_oanda_ema10_candles(asset: str, need_len: int, analysis_bars=None) -> tuple:
+    """يعيد (شموع للتحليل, مصدر) من OANDA لسوق Live فقط."""
+    tgt = analysis_bars if analysis_bars is not None else _HUSAAM_EMA10_ANALYSIS_BARS
+    if tgt < need_len:
+        tgt = need_len
+    now = time.time()
+    _ck = str(asset or "").upper()
+    ce = _oanda_candle_cache.get(_ck)
+    _short_cache_sec = float(os.getenv("OANDA_CANDLE_SHORT_CACHE_SEC", "1.5") or 1.5)
+    _short_cache_sec = max(0.5, min(_short_cache_sec, 3.0))
+    _fetch_min_iv = float(os.getenv("OANDA_CANDLE_FETCH_MIN_INTERVAL_SEC", "8") or 8)
+    _fetch_min_iv = max(4.0, min(_fetch_min_iv, 20.0))
+    _count = int(os.getenv("OANDA_CANDLE_COUNT", str(_OANDA_DEFAULT_CANDLE_COUNT)) or _OANDA_DEFAULT_CANDLE_COUNT)
+    _count = max(max(100, tgt + 20), min(_count, 500))
+
+    def _finalize(raw: list, label: str, instrument: str = "") -> tuple:
+        prep = _prepare_husaam_ema10_candles_for_analysis(raw, max_bars=tgt)
+        if len(prep) < tgt:
+            return [], label + "_insufficient"
+        out = prep[-tgt:] if len(prep) > tgt else prep
+        _t0 = out[0].get("time")
+        _t1 = out[-1].get("time")
+        log.info(
+            "📊 OANDA analysis: مطلوب=%s instrument=%s need=%s got=%s first_ts=%s last_ts=%s src=%s",
+            asset,
+            instrument or "-",
+            tgt,
+            len(out),
+            int(_t0) if _t0 is not None else None,
+            int(_t1) if _t1 is not None else None,
+            label,
+        )
+        return out, label
+
+    if ce and (now - float(ce.get("t", 0.0) or 0.0)) < _short_cache_sec:
+        got, lab = _finalize(ce.get("candles") or [], "oanda_1m_cache", ce.get("instrument") or "")
+        if got:
+            return got, lab
+
+    _last_fetch = float(_oanda_last_fetch_ts.get(_ck, 0.0) or 0.0)
+    if _last_fetch > 0.0 and (now - _last_fetch) < _fetch_min_iv:
+        if ce and ce.get("candles"):
+            got, lab = _finalize(ce.get("candles") or [], "oanda_1m_throttle_cache", ce.get("instrument") or "")
+            if got:
+                return got, lab
+
+    _oanda_last_fetch_ts[_ck] = time.time()
+    rows, instrument = _fetch_oanda_m1_candles(asset, count=_count)
+    if rows:
+        _oanda_candle_cache[_ck] = {"t": time.time(), "candles": rows, "instrument": instrument}
+        got, lab = _finalize(rows, "oanda_1m", instrument)
+        if got:
+            return got, lab
+    if ce and ce.get("candles"):
+        got, lab = _finalize(ce.get("candles") or [], "oanda_stale_cache", ce.get("instrument") or "")
+        if got:
+            return got, lab
+    if not instrument:
+        log.warning("OANDA: لا يمكن مطابقة الزوج %s إلى instrument مدعوم", asset)
+        return [], "oanda_unmapped"
+    log.warning("OANDA: بيانات غير كافية لزوج %s (%s)", asset, instrument)
+    return [], "oanda_insufficient"
 
 
 def _normalize_quotex_candle_row(c):
@@ -1698,7 +3156,8 @@ async def _quotex_prepare_candles_session(client, asset: str, period: int) -> No
     try:
         client.api.current_asset = asset
         client.start_candles_stream(asset, period)
-        await asyncio.sleep(1.0)
+        _prep = float(os.getenv("QUOTEX_CANDLE_PREP_WAIT_SEC", "1.8") or 1.8)
+        await asyncio.sleep(max(0.5, _prep))
     except Exception as e:
         log.debug("quotex_prepare_candles_session: %s", e)
 
@@ -1729,6 +3188,20 @@ def _extract_v2_chart_ohlc_candles(client, asset: str) -> list:
     return _sort_candles_by_time(out)
 
 
+async def _wait_candle_v2_from_stream(
+    client, asset: str, min_rows: int = 3, max_wait_sec: float = 4.0
+) -> None:
+    """
+    بعد مسح candle_v2_data غالباً يصل رد history/list عبر WebSocket قبل اكتمال get_candle_v2.
+    ينتظر حتى تظهر شموع OHLC في candle_v2_data أو تنتهي المهلة.
+    """
+    deadline = time.time() + max(0.2, max_wait_sec)
+    while time.time() < deadline:
+        if len(_extract_v2_chart_ohlc_candles(client, asset)) >= min_rows:
+            return
+        await asyncio.sleep(0.2)
+
+
 async def _fetch_quotex_minute_once(client, asset: str) -> list:
     """شموع 1m: أصل نصّي — ترتيب: تهيئة أصل + stream + انتظار → v2 ثم history/load (offset صغير)."""
     period = _HUSAAM_EMA10_CANDLE_SECS
@@ -1741,7 +3214,13 @@ async def _fetch_quotex_minute_once(client, asset: str) -> list:
     except Exception:
         pass
 
-    _HUSAAM_WS_LAST["patched_fill"] = False
+    _api0 = getattr(client, "api", None)
+    if _api0 is not None:
+        _d0 = getattr(_api0, "_nexora_ws_last", None)
+        if not isinstance(_d0, dict):
+            _d0 = {}
+            _api0._nexora_ws_last = _d0
+        _d0["patched_fill"] = False
     await _quotex_prepare_candles_session(client, asset, period)
     stream_ok = getattr(getattr(client, "api", None), "current_asset", None) == asset
     cur = getattr(getattr(client, "api", None), "current_asset", None)
@@ -1753,16 +3232,30 @@ async def _fetch_quotex_minute_once(client, asset: str) -> list:
             client.api.candle_v2_data[asset] = None
         except Exception:
             pass
+        _ws_wait = float(os.getenv("QUOTEX_CANDLE_V2_WS_WAIT_SEC", "4.0") or 4.0)
+        await _wait_candle_v2_from_stream(
+            client, asset, min_rows=3, max_wait_sec=max(0.5, _ws_wait)
+        )
         log.info(
             "📊 EMA10: طلب get_candle_v2 بعد stream | asset=%s current=%s period=%s",
             asset,
             cur,
             period,
         )
-        raw_v2 = await asyncio.wait_for(client.get_candle_v2(asset, period), timeout=5.0)
+        _v2_to = float(os.getenv("QUOTEX_GET_CANDLE_V2_TIMEOUT", "8") or 8)
+        raw_v2 = await asyncio.wait_for(
+            client.get_candle_v2(asset, period), timeout=max(5.0, _v2_to)
+        )
     except Exception as e:
         log.debug("get_candle_v2(%s): %s", asset, e)
         raw_v2 = []
+    if not raw_v2:
+        log.warning(
+            "📊 EMA10: get_candle_v2 فارغ بعد الانتظار | asset=%s current=%s period=%s",
+            asset,
+            getattr(getattr(client, "api", None), "current_asset", None),
+            period,
+        )
     if raw_v2:
         out_v2 = []
         for c in raw_v2:
@@ -1780,7 +3273,9 @@ async def _fetch_quotex_minute_once(client, asset: str) -> list:
         )
     if len(best) >= _HUSAAM_EMA10_ANALYSIS_BARS:
         best = _sort_candles_by_time(best)
-        _log_husaam_fetch_diag(asset, cur, period, need_slots, off, best, stream_ok, False, False)
+        _log_husaam_fetch_diag(
+            asset, cur, period, need_slots, off, best, stream_ok, False, False, client=client
+        )
         return best
 
     try:
@@ -1820,7 +3315,9 @@ async def _fetch_quotex_minute_once(client, asset: str) -> list:
 
     best = _sort_candles_by_time(best)
     hist_sent = True
-    _log_husaam_fetch_diag(asset, cur, period, need_slots, off, best, stream_ok, hist_sent, True)
+    _log_husaam_fetch_diag(
+        asset, cur, period, need_slots, off, best, stream_ok, hist_sent, True, client=client
+    )
     return best
 
 
@@ -1834,7 +3331,15 @@ def _log_husaam_fetch_diag(
     stream_ok: bool,
     history_sent: bool,
     after_get_candles: bool,
+    client=None,
 ) -> None:
+    _iv = float(os.getenv("BOT_EMA10_PIPELINE_LOG_INTERVAL_SEC", "20") or 20)
+    _iv = max(5.0, min(_iv, 300.0))
+    _key = f"{asset}|{current_asset}|{period}|{int(bool(after_get_candles))}"
+    _tn = time.time()
+    if _tn - float(_husaam_ema10_pipeline_log_ts.get(_key, 0.0) or 0.0) < _iv:
+        return
+    _husaam_ema10_pipeline_log_ts[_key] = _tn
     n = len(best)
     first_ts = last_ts = None
     if best:
@@ -1851,6 +3356,10 @@ def _log_husaam_fetch_diag(
     cleaned = len(prep)
     ok40 = cleaned >= _HUSAAM_EMA10_ANALYSIS_BARS
     ws = _HUSAAM_WS_LAST
+    if client is not None:
+        _api_d = getattr(getattr(client, "api", None), "_nexora_ws_last", None)
+        if isinstance(_api_d, dict):
+            ws = _api_d
     log.info(
         "📊 EMA10 pipeline | مطلوب=%s | current=%s | stream_ok=%s | history_sent=%s | "
         "after_ws_get_candles=%s | ws_last_hist_len=%s | ws_patched=%s | "
@@ -1893,9 +3402,17 @@ def _get_husaam_ema10_candles(client, email: str, asset: str, need_len: int, ana
     """يعيد (شموع للتحليل, مصدر). التحليل من آخر N شمعة 1m من Quotex بعد التنظيف — لا تيكات."""
     tgt = analysis_bars if analysis_bars is not None else _HUSAAM_EMA10_ANALYSIS_BARS
     if not QX or not client:
-        return _build_candles(asset, candle_secs=_HUSAAM_EMA10_CANDLE_SECS), "sim_tick_1m"
+        return _build_candles(email, asset, candle_secs=_HUSAAM_EMA10_CANDLE_SECS), "sim_tick_1m"
     now = time.time()
-    ce = _husaam_api_candle_cache.get(asset)
+    _ck = _session_ema_cache_key(email, asset)
+    _mck = (_ck[0], _ck[1], _HUSAAM_EMA10_CANDLE_SECS)
+    ce = _husaam_api_candle_cache.get(_ck)
+    mc = _husaam_micro_candle_cache.get(_mck)
+
+    _short_cache_sec = float(os.getenv("BOT_CANDLE_SHORT_CACHE_SEC", "1.5") or 1.5)
+    _short_cache_sec = max(0.5, min(_short_cache_sec, 2.5))
+    _fetch_min_iv = float(os.getenv("BOT_CANDLE_FETCH_MIN_INTERVAL_SEC", "8") or 8)
+    _fetch_min_iv = max(6.0, min(_fetch_min_iv, 10.0))
 
     def _finalize(raw: list, label: str) -> tuple:
         prep = _prepare_husaam_ema10_candles_for_analysis(raw, max_bars=tgt)
@@ -1906,10 +3423,12 @@ def _get_husaam_ema10_candles(client, email: str, asset: str, need_len: int, ana
         t0 = out[0].get("time")
         t1 = out[-1].get("time")
         _tl = time.time()
-        _throttle = label == "quotex_1m_cache" and (_tl - _husaam_ema10_analysis_log_ts.get(asset, 0) < 30)
+        _throttle = label in ("quotex_1m_cache", "quotex_1m_central") and (
+            _tl - _husaam_ema10_analysis_log_ts.get(_ck, 0) < 30
+        )
         if not _throttle:
             log.info(
-                "📊 EMA10 analysis: asset=%s current_asset=%s period=60 need=%s got=%s first_ts=%s last_ts=%s src=%s",
+                "📊 EMA10 analysis: مطلوب=%s ws_current=%s period=60 need=%s got=%s first_ts=%s last_ts=%s src=%s",
                 asset,
                 cur,
                 tgt,
@@ -1918,8 +3437,24 @@ def _get_husaam_ema10_candles(client, email: str, asset: str, need_len: int, ana
                 int(t1) if t1 is not None else None,
                 label,
             )
-            _husaam_ema10_analysis_log_ts[asset] = _tl
+            _husaam_ema10_analysis_log_ts[_ck] = _tl
         return out, label
+
+    if mc and (now - float(mc.get("t", 0.0) or 0.0)) < _short_cache_sec:
+        got, lab = _finalize(mc.get("candles") or [], "quotex_1m_micro_cache")
+        if got:
+            return got, lab
+
+    if _central_market_enabled() and QX and client:
+        snap = _central_get_candle_snapshot(asset)
+        if snap and snap.get("candles"):
+            _snap_age = now - float(snap.get("t") or 0)
+            if _snap_age < max(_HUSAAM_QUOTEX_CACHE_SEC * 2, 120.0):
+                prep_c = _prepare_husaam_ema10_candles_for_analysis(
+                    snap["candles"], max_bars=tgt
+                )
+                if len(prep_c) >= tgt:
+                    return _finalize(snap["candles"], "quotex_1m_central")
 
     if (
         ce
@@ -1932,14 +3467,57 @@ def _get_husaam_ema10_candles(client, email: str, asset: str, need_len: int, ana
         if len(prep0) >= tgt:
             return _finalize(ce["candles"], "quotex_1m_cache")
 
+    _last_fetch = float(_husaam_last_fetch_ts.get(_ck, 0.0) or 0.0)
+    _since_last = now - _last_fetch
+    if _last_fetch > 0.0 and _since_last < _fetch_min_iv:
+        if ce and ce.get("candles"):
+            got, lab = _finalize(ce["candles"], "quotex_1m_throttle_cache")
+            if got:
+                return got, lab
+
     try:
-        lst = run_async_for(email, _fetch_quotex_minute_candles_async(client, asset), _HUSAAM_QUOTEX_FETCH_TIMEOUT_SEC)
+        _fto = float(
+            os.getenv(
+                "HUSAAM_QUOTEX_FETCH_TIMEOUT_SEC",
+                str(_HUSAAM_QUOTEX_FETCH_TIMEOUT_SEC),
+            )
+            or _HUSAAM_QUOTEX_FETCH_TIMEOUT_SEC
+        )
+        _fto = max(30.0, min(_fto, 180.0))
+        _ser = os.getenv("NEXORA_SERIALIZE_QUOTEX_CANDLE_FETCH", "per_client").strip().lower()
+        _husaam_last_fetch_ts[_ck] = time.time()
+        if _ser in ("0", "false", "no", "off"):
+            lst = run_async_for(
+                email,
+                _fetch_quotex_minute_candles_async(client, asset),
+                _fto,
+            )
+        elif _ser in ("global", "all", "1", "true", "yes", "on"):
+            with _QUOTEX_MINUTE_FETCH_LOCK:
+                lst = run_async_for(
+                    email,
+                    _fetch_quotex_minute_candles_async(client, asset),
+                    _fto,
+                )
+        else:
+            with _get_quotex_minute_fetch_lock_for_client(client):
+                lst = run_async_for(
+                    email,
+                    _fetch_quotex_minute_candles_async(client, asset),
+                    _fto,
+                )
     except Exception as e:
-        log.warning("جلب شموع Quotex: %s", e)
+        _em = str(e).strip()
+        log.warning(
+            "جلب شموع Quotex: %s",
+            _em if _em else type(e).__name__,
+        )
         lst = []
 
     if lst:
-        _husaam_api_candle_cache[asset] = {"t": now, "candles": lst, "source": "quotex"}
+        _tn = time.time()
+        _husaam_api_candle_cache[_ck] = {"t": _tn, "candles": lst, "source": "quotex"}
+        _husaam_micro_candle_cache[_mck] = {"t": _tn, "candles": lst}
         got, lab = _finalize(lst, "quotex_1m")
         if got:
             return got, lab
@@ -1976,20 +3554,6 @@ def _extract_balance(p):
     except: pass
     return real, demo
 
-
-def _balances_from_ws_account_cache(client):
-    """Quotex يملأ `api.account_balance` من رسائل WebSocket (liveBalance/demoBalance)."""
-    api = getattr(client, "api", None)
-    ab = getattr(api, "account_balance", None) if api else None
-    if not isinstance(ab, dict):
-        return None
-    try:
-        r = float(ab.get("liveBalance") or ab.get("live_balance") or 0)
-        d = float(ab.get("demoBalance") or ab.get("demo_balance") or 0)
-    except (TypeError, ValueError):
-        return None
-    return r, d
-
 def _extract_currency(p):
     try:
         if isinstance(p, dict): return p.get("currency", p.get("currency_char","USD"))
@@ -1999,69 +3563,28 @@ def _extract_currency(p):
     except: pass
     return "USD"
 
-async def _get_balance_wait(client, timeout_sec: float = 14.0):
-    """get_balance في pyquotex ينتظر account_balance إلى ما لا نهاية — نحدّه بمهلة."""
-    try:
-        return await asyncio.wait_for(client.get_balance(), timeout=timeout_sec)
-    except asyncio.TimeoutError:
-        log.warning("get_balance: انتهت المهلة %.1fs", timeout_sec)
-        return None
-    except Exception as e:
-        log.warning("get_balance: %s", e)
-        return None
-
-
 async def _get_balances(client):
     real = demo = 0.0
-    # 1) كاش الـ WS (يصل غالباً مباشرة بعد اتصال السوكيت)
-    got = _balances_from_ws_account_cache(client)
-    if got is not None:
-        real, demo = got
-        if real > 0 or demo > 0:
-            log.info("📋 أرصدة من WebSocket cache: real=%s demo=%s", real, demo)
-            return real, demo
-
-    # 2) إن لم تُرسَل بعد — انتظر قصيراً ثم أعد القراءة
-    for i in range(24):
-        await asyncio.sleep(0.25)
-        got = _balances_from_ws_account_cache(client)
-        if got is not None:
-            real, demo = got
-            if real > 0 or demo > 0:
-                log.info("📋 أرصدة من WS بعد انتظار %.1fs: real=%s demo=%s", (i + 1) * 0.25, real, demo)
-                return real, demo
-
-    # 3) HTTP profile / إعدادات
     try:
         p = await client.get_profile()
-        log.info("📋 profile type=%s", type(p).__name__)
+        log.info(f"📋 profile type={type(p).__name__}")
         real, demo = _extract_balance(p)
-        if real > 0 or demo > 0:
-            return real, demo
+        if real > 0 or demo > 0: return real, demo
     except Exception as e:
-        log.warning("get_profile: %s", e)
-
-    # 4) تبديل حساب + get_balance بمهلة (بدون تعليق لا نهائي)
+        log.warning(f"get_profile: {e}")
     try:
         await client.change_account("REAL")
-        await asyncio.sleep(1.5)
-        rb = await _get_balance_wait(client, 14.0)
-        real = float(rb or 0)
+        await asyncio.sleep(3)
+        real = float(await client.get_balance() or 0)
+        await asyncio.sleep(2)
         await client.change_account("PRACTICE")
-        await asyncio.sleep(1.5)
-        db = await _get_balance_wait(client, 14.0)
-        demo = float(db or 0)
-        if real == demo and real > 0:
-            real = 0.0
-        log.info("📋 أرصدة من change_account/get_balance: real=%s demo=%s", real, demo)
+        await asyncio.sleep(3)
+        demo = float(await client.get_balance() or 0)
+        if real == demo and real > 0: real = 0.0
         return real, demo
     except Exception as e:
-        log.error("_get_balances: %s", e)
-    # 5) آخر محاولة: أي قيمة في كاش الـ WS حتى لو صفر
-    got = _balances_from_ws_account_cache(client)
-    if got is not None:
-        return got[0], got[1]
-    return 0.0, 0.0
+        log.error(f"_get_balances: {e}")
+        return 0.0, 0.0
 
 async def _get_single_balance(client, mode) -> float:
     try:
@@ -2070,32 +3593,113 @@ async def _get_single_balance(client, mode) -> float:
         return float(await client.get_balance() or 0)
     except: return 0.0
 
+def _invalidate_pyquotex_disk_session(email: str) -> None:
+    """
+    pyquotex يقرأ session.json (في cwd). إن وُجد token قديم/منتهٍ يتخطّى HTTP login
+    فيُرفض WebSocket برسالة authorization/reject → Token rejected.
+    مسح التوكن يفرض authenticate() كاملاً عند كل تسجيل دخول من الواجهة.
+    عطّل بـ QUOTEX_KEEP_DISK_SESSION=1 إن احتجت إعادة استخدام الجلسة المحفوظة.
+    """
+    if os.getenv("QUOTEX_KEEP_DISK_SESSION", "").strip().lower() in ("1", "true", "yes"):
+        return
+    path = os.path.join(os.getcwd(), "session.json")
+    if not os.path.isfile(path):
+        return
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, dict) or email not in data:
+            return
+        ent = data.get(email) or {}
+        ua = ent.get("user_agent") if isinstance(ent, dict) else None
+        # ── [NEXORA FIX A] حفظ لقطة cookies للجسر قبل المسح ──────────────────
+        # session.json يُمسح أدناه، لكن الجسر يحتاج cf_clearance لاحقاً.
+        # نحفظها في data/bridge_cookies/ قبل الكتابة الصفرية.
+        try:
+            from cookie_bridge import save_cf_cookies_from_session
+            save_cf_cookies_from_session(email, path)
+        except Exception as _cbe:
+            log.debug("[cookie_bridge] snapshot pre-invalidate failed: %s", _cbe)
+        # ──────────────────────────────────────────────────────────────────────
+        data[email] = {"cookies": None, "token": None, "user_agent": ua or ""}
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=4)
+        log.info("🧹 مُسح token/cookies المحفوظة في session.json لهذا البريد — إعادة تسجيل دخول Quotex كاملة")
+    except Exception as e:
+        log.warning("تعذر تحديث session.json: %s", e)
+
+
 async def _login_qx(email, password, S):
     try:
         S["login_error"] = ""
+        _invalidate_pyquotex_disk_session(email)
         client = Quotex(
             email=email,
             password=password,
             lang="en",
-            proxies=_QX_PROXY_DICT,
+            proxies=QX_HTTP_PROXIES,
         )
         S["client"] = client
+        # ── [NEXORA FIX E] حفظ CF cookies مباشرة من aiohttp بعد authenticate() ──
+        # session.json يُكتب فقط بعد WS ناجح، لذا نقرأ من CookieJar مباشرة.
+        try:
+            import pyquotex.api as _qx_api_mod
+            _orig_auth = _qx_api_mod.QuotexAPI.authenticate
+            if not getattr(_qx_api_mod.QuotexAPI.authenticate, "_nexora_cf_patch", False):
+                async def _patched_auth(self_api, *_a, **_kw):
+                    result = await _orig_auth(self_api, *_a, **_kw)
+                    try:
+                        from cookie_bridge import save_cf_cookies_from_client, has_cf_clearance
+                        save_cf_cookies_from_client(email, self_api)
+                        # إن لم تُوجد cf_clearance بعد → اطلبها من FlareSolverr
+                        if not has_cf_clearance(email):
+                            try:
+                                from flare_cf import fetch_and_save_cf_clearance, is_flaresolverr_running
+                                if is_flaresolverr_running():
+                                    log.info("[flare_cf] cf_clearance غير موجود — جلبه من FlareSolverr ...")
+                                    _flare_ok = fetch_and_save_cf_clearance(email, "https://qxbroker.com")
+                                    if _flare_ok:
+                                        log.info("[flare_cf] ✅ cf_clearance جُلب وحُفظ")
+                                    else:
+                                        log.warning("[flare_cf] ⚠️ FlareSolverr شغّال لكن cf_clearance لم يُستلم")
+                                else:
+                                    log.warning(
+                                        "[flare_cf] FlareSolverr غير شغّال — WS سيفشل بـ 403. "
+                                        "شغّله: docker run -p 8191:8191 ghcr.io/flaresolverr/flaresolverr:latest"
+                                    )
+                            except Exception as _fe:
+                                log.debug("[flare_cf] %s", _fe)
+                    except Exception as _cpe:
+                        log.debug("[cookie_bridge] post-auth: %s", _cpe)
+                    return result
+                _patched_auth._nexora_cf_patch = True
+                _qx_api_mod.QuotexAPI.authenticate = _patched_auth
+        except Exception as _patch_err:
+            log.debug("[cookie_bridge] authenticate patch skipped: %s", _patch_err)
+        # ─────────────────────────────────────────────────────────────────────────
         import builtins
         orig = builtins.input
         builtins.input = make_pin_input(email, S)
         try: check, msg = await client.connect()
         finally: builtins.input = orig
         if not check:
+            if is_cloudflare_ws_failure(msg):
+                log.warning("Cloudflare WS detected. تشغيل Stealth ثم إعادة connect مرة واحدة...")
+                try:
+                    stealth_proxy = str(QX_HTTP_PROXIES.get("https") or QX_HTTP_PROXIES.get("http") or "") if isinstance(QX_HTTP_PROXIES, dict) else None
+                    establish_websocket_with_stealth(proxy=stealth_proxy)
+                    import builtins as _b2
+                    _orig2 = _b2.input
+                    _b2.input = make_pin_input(email, S)
+                    try:
+                        check, msg = await client.connect()
+                    finally:
+                        _b2.input = _orig2
+                except Exception as _e:
+                    log.warning("Stealth reconnect failed: %s", _e)
             if S["needs_pin"]:
                 return {"ok":False,"pin":True,"msg":"أدخل PIN من بريدك"}
             err = str(msg) or "فشل الاتصال"
-            if (
-                "403" in err
-                and ("Just a moment" in err or "cf-mitigated" in err or len(err) > 2000)
-            ):
-                err = (
-                    "رفض WebSocket من Cloudflare (تحدي المتصفح). جرّب بروكسي سكني آخر أو تشغيل من شبكة منزلية."
-                )
             S["login_error"] = err[:800]
             return {"ok":False,"pin":False,"msg":err}
         real, demo = await _get_balances(client)
@@ -2104,7 +3708,7 @@ async def _login_qx(email, password, S):
             p = await client.get_profile()
             cur = _extract_currency(p)
         except: pass
-        # /api/login يعيد فوراً؛ النتيجة تُطبَّق في _on_qx_login_future_done — يجب ملء S هنا بعد نجاح connect
+        # عند إرجاع needs_pin مبكراً من /api/login لا يُكمَل الهاندلر — يجب حفظ الجلسة هنا بعد نجاح connect + الأرصدة
         S["real_balance"] = real
         S["demo_balance"] = demo
         S["currency"] = cur
@@ -2112,6 +3716,18 @@ async def _login_qx(email, password, S):
         S["needs_pin"] = False
         S["email"] = email
         S["login_error"] = ""
+        # ── [NEXORA FIX B] حفظ cookies CF بعد connect ناجح ──────────────────
+        try:
+            from cookie_bridge import save_cf_cookies_from_session
+            _saved = save_cf_cookies_from_session(email)
+            if _saved:
+                log.info("[login] ✅ cookies CF محفوظة للجسر (data/bridge_cookies/)")
+            else:
+                log.warning("[login] ⚠️ لم تُحفظ cookies CF للجسر.")
+        except Exception as _cbe:
+            log.debug("[cookie_bridge] post-login save: %s", _cbe)
+        # ─────────────────────────────────────────────────────────────────────
+        _ux_session_open(S)
         return {"ok":True,"client":client,"real":real,"demo":demo,"cur":cur}
     except Exception as e:
         log.error(traceback.format_exc())
@@ -2119,67 +3735,16 @@ async def _login_qx(email, password, S):
         S["login_error"] = err[:800]
         return {"ok":False,"pin":False,"msg":err}
 
-
-def _on_qx_login_future_done(email: str, S: dict, gen: int, fut):
-    """يُستدعى عند اكتمال _login_qx؛ يتجاهل النتيجة إن بدأ المستخدم تسجيل دخول أحدث."""
-    try:
-        r = fut.result()
-    except Exception as e:
-        if S.get("_login_gen") != gen:
-            return
-        log.exception("login: نتيجة مهمة الدخول")
-        S["login_pending"] = False
-        S["login_error"] = (str(e) or "فشل تسجيل الدخول")[:800]
-        return
-
-    if S.get("_login_gen") != gen:
-        if isinstance(r, dict) and r.get("ok") and r.get("client"):
-            try:
-                _loop = get_session_loop(email)
-                asyncio.run_coroutine_threadsafe(_close(r["client"]), _loop)
-            except Exception:
-                pass
-        return
-
-    S["login_pending"] = False
-
-    if r.get("pin"):
-        S["needs_pin"] = True
-        return
-
-    if not r.get("ok"):
-        msg = str(r.get("msg", "فشل"))
-        blocked_region = any(
-            x in msg.lower()
-            for x in (
-                "service unavailable",
-                "not available in your region",
-                "region",
-                "cloudflare",
-            )
-        )
-        if blocked_region:
-            S["login_error"] = "Quotex غير متاح من السيرفر/المنطقة الحالية. تعذر الدخول الحقيقي."
-        else:
-            S["login_error"] = msg[:800]
-        return
-
-    S["client"] = r["client"]
-    S["real_balance"] = r["real"]
-    S["demo_balance"] = r["demo"]
-    S["currency"] = r.get("cur", "USD")
-    S["logged_in"] = True
-    S["needs_pin"] = False
-    S["email"] = email
-    S["login_error"] = ""
-
-
-async def _do_trade(client, asset, amount, direction, acc):
+async def _do_trade(client, asset, amount, direction, acc, duration_sec=60):
     try:
         await client.change_account("REAL" if acc=="real" else "PRACTICE")
         await asyncio.sleep(0.5)
-        ok, info = await client.buy(amount=amount, asset=asset,
-                                    direction=direction, duration=60)
+        ok, info = await client.buy(
+            amount=amount,
+            asset=asset,
+            direction=direction,
+            duration=int(duration_sec),
+        )
         if ok:
             tid = info.get("id") if isinstance(info,dict) else None
             log.info(f"✅ صفقة: {asset} {direction.upper()} {amount} id={tid}")
@@ -2190,6 +3755,21 @@ async def _do_trade(client, asset, amount, direction, acc):
         log.error(traceback.format_exc())
         return {"ok":False,"msg":str(e)}
 
+
+def _is_time_insufficient_msg(msg: str) -> bool:
+    m = str(msg or "").lower()
+    return any(
+        x in m
+        for x in (
+            "insufficient",
+            "not enough time",
+            "time is over",
+            "purchase time",
+            "وقت غير كافي",
+            "الوقت غير كافي",
+        )
+    )
+
 async def _check_win(client, tid):
     try:
         win = await client.check_win(tid)
@@ -2197,10 +3777,40 @@ async def _check_win(client, tid):
         return {"win":bool(win),"profit":float(prf or 0)}
     except: return {"win":False,"profit":0.0}
 
+
+def _session_trade_pnl(win: bool, stake: float, raw_from_api: float) -> float:
+    """
+    نتيجة صفقة واحدة لصافي الجلسة (مجموع الصفقات) — وليس من فرق الرصيد:
+    - خسارة كاملة: دائماً -قيمة الدخول (تفادي خطأ عندما تعيد المنصة profit سالباً فيُعاد قلب الإشارة).
+    - ربح: الربح الصافي فقط. الافتراض أن get_profit() يعيد صافي الربح؛ إن كان يعيد العائد
+      الكامل (دخول+ربح) عيّن QUOTEX_WIN_PROFIT_IS_GROSS=1.
+    """
+    a = float(stake or 0)
+    if a < 0:
+        a = 0.0
+    a = round(a, 2)
+    if not win:
+        return round(-a, 2) if a else 0.0
+    x = float(raw_from_api or 0)
+    if x < 0:
+        x = 0.0
+    if os.getenv("QUOTEX_WIN_PROFIT_IS_GROSS", "").strip().lower() in ("1", "true", "yes"):
+        if x > a + 1e-9:
+            x = x - a
+    return round(x, 2)
+
+
 async def _close(client):
     try:
-        if client: await client.close()
-    except: pass
+        if client:
+            _central_detach_client(client)
+            api = getattr(client, "api", None)
+            try:
+                await client.close()
+            finally:
+                _stop_playwright_bridge_for_api(api)
+    except Exception:
+        pass
 
 # ══════════════════════════════════════════════════════════════════════════════
 # BOT WORKER
@@ -2230,22 +3840,96 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
     if req.asset and req.asset not in all_assets:
         all_assets.insert(0, req.asset)
     all_assets = list(dict.fromkeys(all_assets))  # إزالة المكررات
+    _max_assets = int(os.getenv("BOT_MAX_ASSETS_PER_SESSION", "2") or 2)
+    _max_assets = max(1, min(_max_assets, 8))
+    if len(all_assets) > _max_assets:
+        log.info(
+            "⚖️ تقليل الأزواج المتزامنة للجلسة: %s -> %s (BOT_MAX_ASSETS_PER_SESSION)",
+            len(all_assets),
+            _max_assets,
+        )
+        all_assets = all_assets[:_max_assets]
     log.info(f"🤖 {S['email']} | {all_assets} | {req.amount} | {req.strategy} | {req.account_type}")
+    # مدة الصفقة: افتراضياً 60 ثانية. بعض حسابات Quotex ترفض 90s وتسبب timeout.
+    trade_duration_sec = int(os.getenv("TRADE_DURATION_SEC", "60") or 60)
+    if trade_duration_sec not in (60,):
+        log.warning("TRADE_DURATION_SEC=%s غير مدعوم بثبات حالياً — سيتم استخدام 60s", trade_duration_sec)
+    trade_duration_sec = 60
+    # الدخول مسموح فقط ضمن نافذة زمنية محددة قبل إغلاق الصفقة:
+    # افتراضياً بين 59 و 90 ثانية (كما طلبت).
+    entry_window_min_sec = float(os.getenv("ENTRY_WINDOW_MIN_SEC", "59") or 59)
+    entry_window_max_sec = float(os.getenv("ENTRY_WINDOW_MAX_SEC", "90") or 90)
+    if entry_window_max_sec < entry_window_min_sec:
+        entry_window_min_sec, entry_window_max_sec = entry_window_max_sec, entry_window_min_sec
+    # منع تكرار نفس الصفقة المتتالية بسرعة
+    entry_cooldown_sec = max(30, trade_duration_sec)
+    # بعد تكرار WAIT عدة دورات، فعّل fallback أسرع (الافتراضي 6 ≈ قرابة دقيقة حسب زمن الدورة).
+    fallback_wait_streak = int(os.getenv("BOT_FALLBACK_WAIT_STREAK", "6") or 6)
+    fallback_wait_streak = max(2, min(fallback_wait_streak, 24))
+    # حد أقصى للانتظار بين الصفقات: إذا لا توجد إشارة تُؤخذ صفقة باتجاه السوق بعد هذا الزمن.
+    force_entry_interval_sec = float(
+        os.getenv("BOT_FORCE_ENTRY_INTERVAL_SEC", "120" if req.strategy == "LIVE" else "240")
+        or ("120" if req.strategy == "LIVE" else "240")
+    )
+    force_entry_interval_sec = max(60.0, min(force_entry_interval_sec, 1800.0))
+    force_entry_retry_sec = float(os.getenv("BOT_FORCE_ENTRY_RETRY_SEC", "20") or 20)
+    force_entry_retry_sec = max(5.0, min(force_entry_retry_sec, 180.0))
+    # إعادة تشغيل ذاتية عند تكرار حالة 0/N شموع 1m من الشارت (جلسة WS متدهورة غالباً)
+    auto_restart_zero_candles_streak = int(
+        os.getenv("BOT_AUTO_RESTART_ZERO_CANDLES_STREAK", "6") or 6
+    )
+    auto_restart_zero_candles_streak = max(2, min(auto_restart_zero_candles_streak, 60))
+    auto_restart_cooldown_sec = float(
+        os.getenv("BOT_AUTO_RESTART_COOLDOWN_SEC", "120") or 120
+    )
+    auto_restart_cooldown_sec = max(30.0, min(auto_restart_cooldown_sec, 900.0))
+
+    # يمنع بقاء worker قديم يعمل بعد Stop/Start جديد.
+    def _should_stop() -> bool:
+        return (
+            stop.is_set()
+            or not bool(S.get("running", False))
+            or (S.get("stop_event") is not stop)
+        )
+
+    def _schedule_self_restart(reason: str) -> bool:
+        """إطلاق worker جديد لنفس الجلسة ثم إنهاء الحالي بأمان."""
+        now = time.time()
+        last = float(S.get("_last_auto_restart_ts", 0) or 0)
+        if now - last < auto_restart_cooldown_sec:
+            return False
+        S["_last_auto_restart_ts"] = now
+        S["status_msg"] = "♻️ إعادة تشغيل تلقائية للبوت بسبب نقص الشموع من الشارت..."
+        log.warning("♻️ %s — إعادة تشغيل تلقائية للبوت", reason)
+        new_stop = threading.Event()
+        S["stop_event"] = new_stop
+        S["running"] = True
+        threading.Thread(target=bot_worker, args=(req, S, new_stop), daemon=True).start()
+        stop.set()
+        return True
 
     # تتبع آخر زوج استُخدم لتجنب التكرار
     last_used_asset = None
+    # منع تكرار نفس الإشارة أكثر من مرة في نفس دقيقة الشمعة
+    signal_attempted = {}
 
-    # ── بدء تدفق الأسعار الحية لكل الأزواج ───────────────────────────────────
+    # ── بدء تدفق الأسعار: إما سوق مركزي (مغذّي واحد لكل زوج) أو ستريم لكل حساب ──
     if QX and S["client"]:
         try:
-            run_async_for(S["email"], _ensure_quotex_assets(S["client"]), 45)
+            _assets_to = float(os.getenv("QUOTEX_GET_ALL_ASSETS_TIMEOUT_SEC", "75") or 75)
+            _assets_to = max(20.0, min(_assets_to, 180.0))
+            run_async_for(S["email"], _ensure_quotex_assets(S["client"]), _assets_to)
         except Exception:
             pass
-        for a in all_assets:
-            try:
-                run_async_for(S["email"], _start_price_stream(S["client"], a), 20)
-            except Exception:
-                pass
+        if _central_market_enabled():
+            for a in all_assets:
+                _central_ensure_feeder(a, S["email"], S["client"])
+        else:
+            for a in all_assets:
+                try:
+                    run_async_for(S["email"], _start_price_stream(S["client"], a), 20)
+                except Exception:
+                    pass
 
     # ── جمع تيكات للمراقبة فقط — التحليل من شموع 1m من Quotex لجميع الاستراتيجيات عند الاتصال
     _wu = (
@@ -2256,14 +3940,19 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
     S["status_msg"] = "⏳ تجهيز المراقبة (أسعار حية للواجهة)..."
     log.info("⏳ جمع أسعار حية للمراقبة — %s ثانية...", _wu)
     warmup = time.time()
-    while time.time() - warmup < _wu and not stop.is_set():
-        if QX and S["client"]:
+    while time.time() - warmup < _wu and not _should_stop():
+        if QX and S["client"] and not _central_market_enabled():
             for a in all_assets:
                 _collect_price(S["client"], a, S["email"])
         stop.wait(timeout=1)
-    if stop.is_set(): return
+    if _should_stop(): return
 
-    _tick_total = sum(len(_price_buffers.get(a, [])) for a in all_assets)
+    if _central_market_enabled():
+        _tick_total = sum(_central_ticks_len(a) for a in all_assets)
+    else:
+        _tick_total = sum(
+            len(_price_buffers.get(_session_price_key(S["email"], a), [])) for a in all_assets
+        )
     log.info("✅ مراقبة: %s تيك محفوظ — بدء الحلقة (%s)", _tick_total, req.strategy)
     S["status_msg"] = ""
 
@@ -2299,25 +3988,31 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
         start_bal = S["demo_balance"] if req.account_type=="demo" else S["real_balance"]
     S["start_balance"] = start_bal
     log.info(f"🏁 رصيد البداية المعتمد: {start_bal}")
+    if float(S.get("_last_trade_open_ts", 0) or 0) <= 0:
+        S["_last_trade_open_ts"] = time.time()
 
 
-    while not stop.is_set():
+    while not _should_stop():
         try:
-            # ── جمع الأسعار الحية ──────────────────────────────────────────
-            if QX and S["client"]: _collect_price(S["client"], req.asset, S["email"])
-
-            # جمع سعر إضافي
-            if QX and S["client"]: _collect_price(S["client"], req.asset, S["email"])
+            # ── جمع الأسعار الحية (السوق المركزي يغذّي المخزن منفصلاً) ────────
+            if QX and S["client"] and not _central_market_enabled():
+                _collect_price(S["client"], req.asset, S["email"])
+                _collect_price(S["client"], req.asset, S["email"])
 
             # ── تحليل الشمعات ─────────────────────────────────────────────
             direction = "wait"
             chosen_asset = all_assets[0]
+            burst_count = 1
             any_candles = False
+            candles_by_asset = {}
 
             if QX and S["logged_in"] and S["client"]:
-                # جمع أسعار لكل الأزواج
-                for a in all_assets:
-                    _collect_price(S["client"], a, S["email"])
+                if _central_market_enabled():
+                    for a in all_assets:
+                        _central_ensure_feeder(a, S["email"], S["client"])
+                else:
+                    for a in all_assets:
+                        _collect_price(S["client"], a, S["email"])
 
                 # تحليل كل الأزواج واختيار الأقوى إشارة
                 best_score = 0
@@ -2329,13 +4024,36 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
                 _min_bars = (
                     _HUSAAM_PRIVATE_MIN_BARS
                     if req.strategy == "HUSAAM_PRIVATE"
-                    else _HUSAAM_EMA10_ANALYSIS_BARS
+                    else (_LIVE_MIN_BARS if req.strategy == "LIVE" else _HUSAAM_EMA10_ANALYSIS_BARS)
                 )
                 _need_len = _min_bars
+                _oanda_analysis_bars = int(os.getenv("OANDA_ANALYSIS_BARS", "200") or 200)
+                _oanda_analysis_bars = max(_need_len, min(_oanda_analysis_bars, 500))
                 _max_len = 0
                 ema_src_label = ""
+                ema_src_label_ok = ""
+                _need_len_dynamic = _need_len
+                _scan_rows = []  # (asset, dir, score) لبصمة دورة كاملة — يمنع تكرار 🔍 كل ثانية
+                _live_soft_rows = []  # (asset, dir, soft_score) لفرض دخول LIVE بعد المهلة
                 for a in all_assets:
-                    if req.strategy == "HUSAAM_PRIVATE":
+                    _analysis_target = (
+                        _HUSAAM_PRIVATE_MIN_BARS
+                        if req.strategy == "HUSAAM_PRIVATE"
+                        else (_LIVE_MIN_BARS if req.strategy == "LIVE" else _HUSAAM_EMA10_ANALYSIS_BARS)
+                    )
+                    _use_oanda_live = _oanda_live_feed_enabled() and _is_live_asset(a)
+                    if _use_oanda_live:
+                        _analysis_target = max(_analysis_target, _oanda_analysis_bars)
+                    _need_for_asset = _analysis_target if _use_oanda_live else _need_len
+                    if _need_for_asset > _need_len_dynamic:
+                        _need_len_dynamic = _need_for_asset
+                    if _use_oanda_live:
+                        candles, _csrc = _get_oanda_ema10_candles(
+                            a,
+                            _need_len,
+                            analysis_bars=_analysis_target,
+                        )
+                    elif req.strategy == "HUSAAM_PRIVATE":
                         candles, _csrc = _get_husaam_ema10_candles(
                             S["client"],
                             S["email"],
@@ -2343,37 +4061,39 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
                             _need_len,
                             analysis_bars=_HUSAAM_PRIVATE_MIN_BARS,
                         )
-                        if _csrc in ("quotex_1m", "quotex_1m_cache"):
-                            ema_src_label = "شموع Quotex 1m — حسام الخاصة"
-                        elif _csrc == "quotex_stale_cache":
-                            ema_src_label = "شموع 1m — كاش احتياطي"
-                        elif _csrc == "sim_tick_1m":
-                            ema_src_label = "محاكاة (تيك)"
-                        else:
-                            ema_src_label = str(_csrc)
                     else:
                         candles, _csrc = _get_husaam_ema10_candles(
                             S["client"], S["email"], a, _need_len
                         )
-                        if _csrc in ("quotex_1m", "quotex_1m_cache"):
-                            ema_src_label = "شموع Quotex 1m (شارت)"
-                        elif _csrc == "quotex_stale_cache":
-                            ema_src_label = "شموع 1m — كاش احتياطي"
-                        elif _csrc == "sim_tick_1m":
-                            ema_src_label = "محاكاة (تيك)"
-                        else:
-                            ema_src_label = str(_csrc)
+
+                    if _csrc in ("oanda_1m", "oanda_1m_cache", "oanda_1m_throttle_cache"):
+                        ema_src_label = "شموع OANDA 1m (Live)"
+                    elif _csrc == "oanda_stale_cache":
+                        ema_src_label = "شموع OANDA 1m — كاش احتياطي"
+                    elif _csrc in ("quotex_1m", "quotex_1m_cache"):
+                        ema_src_label = (
+                            "شموع Quotex 1m — NEXORA Private"
+                            if req.strategy == "HUSAAM_PRIVATE"
+                            else "شموع Quotex 1m (شارت)"
+                        )
+                    elif _csrc == "quotex_stale_cache":
+                        ema_src_label = "شموع 1m — كاش احتياطي"
+                    elif _csrc == "sim_tick_1m":
+                        ema_src_label = "محاكاة (تيك)"
+                    else:
+                        ema_src_label = str(_csrc)
                     _max_len = max(_max_len, len(candles))
                     candles_by_asset[a] = candles
-                    if len(candles) >= _need_len:
+                    if len(candles) >= _need_for_asset:
                         any_candles = True
+                        if _csrc not in ("quotex_insufficient", "oanda_insufficient", "oanda_unmapped"):
+                            ema_src_label_ok = ema_src_label
+                        if req.strategy == "LIVE":
+                            _sd, _ss = _analyze_live_soft_candidate(candles)
+                            if _sd != "wait":
+                                _live_soft_rows.append((a, _sd, int(_ss)))
                         d, score = analyze_score(candles, req.strategy)
-                        _sig = f"{a}:{d}:{score}"
-                        _tn = time.time()
-                        if _tn - S.get("_last_scan_sig_ts", 0) >= 12 or S.get("_last_scan_sig") != _sig:
-                            log.info(f"🔍 {a}: {d.upper()} score={score}")
-                            S["_last_scan_sig_ts"] = _tn
-                            S["_last_scan_sig"] = _sig
+                        _scan_rows.append((a, d, score))
                         if d != "wait" and score > best_score:
                             # تجنب تكرار نفس الزوج إذا وجد بديل بنفس القوة
                             if score > best_score or a != last_used_asset:
@@ -2381,32 +4101,72 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
                                 best_dir   = d
                                 best_asset = a
 
+                _scan_iv = float(os.getenv("BOT_SCAN_LOG_INTERVAL_SEC", "12") or 12)
+                _scan_iv = max(3.0, min(_scan_iv, 120.0))
+                if _scan_rows:
+                    _fp = "|".join(f"{x[0]}:{x[1]}:{x[2]}" for x in _scan_rows)
+                    _tn = time.time()
+                    if _tn - S.get("_last_scan_fp_ts", 0) >= _scan_iv or S.get("_last_scan_fp") != _fp:
+                        for a, d, score in _scan_rows:
+                            log.info(f"🔍 {a}: {d.upper()} score={score}")
+                        S["_last_scan_fp"] = _fp
+                        S["_last_scan_fp_ts"] = _tn
+
                 S["candles_ok"] = any_candles
-                S["candle_source"] = ema_src_label
+                S["candle_source"] = ema_src_label_ok or ema_src_label
+                if any_candles:
+                    S["_zero_candles_streak"] = 0
+                # إذا عاد التحليل يملك شموعًا كافية، امسح رسالة "نقص الشموع" القديمة
+                if any_candles and str(S.get("status_msg", "")).startswith("⏳ شموع دقيقة:"):
+                    S["status_msg"] = ""
 
                 if best_asset and best_dir != "wait":
                     direction    = best_dir
                     chosen_asset = best_asset
                     S["_wait_streak"] = 0
-                    log.info(f"🏆 أفضل زوج: {chosen_asset} → {direction.upper()} (score={best_score})")
+                    _trophy_fp = f"{chosen_asset}|{direction}|{best_score}"
+                    _trophy_tn = time.time()
+                    _trophy_iv = float(os.getenv("BOT_TROPHY_LOG_INTERVAL_SEC", "12") or 12)
+                    _trophy_iv = max(3.0, min(_trophy_iv, 120.0))
+                    if (
+                        _trophy_tn - S.get("_last_trophy_ts", 0) >= _trophy_iv
+                        or S.get("_last_trophy_fp") != _trophy_fp
+                    ):
+                        log.info(
+                            f"🏆 أفضل زوج: {chosen_asset} → {direction.upper()} (score={best_score})"
+                        )
+                        S["_last_trophy_fp"] = _trophy_fp
+                        S["_last_trophy_ts"] = _trophy_tn
                 elif not any_candles:
+                    if _max_len <= 0:
+                        S["_zero_candles_streak"] = int(S.get("_zero_candles_streak", 0)) + 1
+                    else:
+                        S["_zero_candles_streak"] = 0
                     _now = time.time()
                     if _now - S.get("_last_candle_warn_ts", 0) >= 15:
                         log.warning(
-                            "⚠️ شمعات غير كافية للتحليل — لديك %s/%s شمعة 1m (مطلوب من الشارت لا من التيك)",
+                            "⚠️ شمعات غير كافية للتحليل — لديك %s/%s شمعة 1m (مطلوب من مصدر التحليل لا من التيك)",
                             _max_len,
-                            _need_len,
+                            _need_len_dynamic,
                         )
                         S["_last_candle_warn_ts"] = _now
                     S["status_msg"] = (
-                        f"⏳ شموع دقيقة: {_max_len}/{_need_len} · {ema_src_label}"
+                        f"⏳ شموع دقيقة: {_max_len}/{_need_len_dynamic} · {ema_src_label}"
                     )
+                    if (
+                        _max_len <= 0
+                        and int(S.get("_zero_candles_streak", 0)) >= auto_restart_zero_candles_streak
+                        and _schedule_self_restart(
+                            f"تكرار نقص الشموع {_max_len}/{_need_len_dynamic} لعدد {S.get('_zero_candles_streak')} دورات"
+                        )
+                    ):
+                        return
                     S["_wait_streak"] = 0
                     stop.wait(timeout=1.0)
                     continue
                 else:
                     S["_wait_streak"] = int(S.get("_wait_streak", 0)) + 1
-                    if S["_wait_streak"] >= 12:
+                    if S["_wait_streak"] >= fallback_wait_streak:
                         fb_best_score = 0
                         fb_best_dir = "wait"
                         fb_best_asset = None
@@ -2440,96 +4200,331 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
             if direction == "wait":
                 # any_candles=True: شموع كافية لكن الاستراتيجية أعطت WAIT — ليس «نقص شموع»
                 if any_candles:
+                    _last_trade_ts = float(S.get("_last_trade_open_ts", 0) or 0)
+                    if _last_trade_ts <= 0:
+                        _last_trade_ts = float(S.get("_last_entry_ts", 0) or 0)
+                    _since_last_trade = (
+                        time.time() - _last_trade_ts if _last_trade_ts > 0 else 0.0
+                    )
+                    _now_force = time.time()
+                    _last_force_try = float(S.get("_last_forced_entry_try_ts", 0) or 0)
+                    if (
+                        _since_last_trade >= force_entry_interval_sec
+                        and (_now_force - _last_force_try) >= force_entry_retry_sec
+                    ):
+                        S["_last_forced_entry_try_ts"] = _now_force
+                        fb_best_score = -1
+                        fb_best_dir = "wait"
+                        fb_best_asset = None
+                        if req.strategy == "LIVE":
+                            for a, d2, s2 in _live_soft_rows:
+                                if d2 != "wait" and s2 >= fb_best_score:
+                                    fb_best_score = int(s2)
+                                    fb_best_dir = d2
+                                    fb_best_asset = a
+                        else:
+                            for a, cs in candles_by_asset.items():
+                                d2, s2 = _fallback_direction_from_candles(cs)
+                                if d2 != "wait" and s2 >= fb_best_score:
+                                    fb_best_score = int(s2)
+                                    fb_best_dir = d2
+                                    fb_best_asset = a
+                        _min_force_score = 2 if req.strategy == "LIVE" else 1
+                        if fb_best_asset and fb_best_dir != "wait":
+                            if fb_best_score >= _min_force_score:
+                                direction = fb_best_dir
+                                chosen_asset = fb_best_asset
+                                S["_wait_streak"] = 0
+                                S["status_msg"] = "⚡ دخول تلقائي باتجاه السوق بعد انتظار دقيقتين"
+                                log.info(
+                                    "⚡ Forced trend entry بعد %.0fs: %s → %s (score=%s)",
+                                    _since_last_trade,
+                                    chosen_asset,
+                                    direction.upper(),
+                                    fb_best_score,
+                                )
+                            else:
+                                log.info(
+                                    "⏳ انتهت مهلة %.0fs لكن أعلى score=%s أقل من الحد الأدنى %s",
+                                    force_entry_interval_sec,
+                                    fb_best_score,
+                                    _min_force_score,
+                                )
+                        else:
+                            log.info(
+                                "⏳ انتهت مهلة %.0fs بدون إشارة، لكن اتجاه السوق غير واضح بعد",
+                                force_entry_interval_sec,
+                            )
+                if direction == "wait" and any_candles:
                     wt = 4.0
                     stop.wait(timeout=wt)
-                else:
+                elif direction == "wait":
                     log.info("⏸️ انتظار (لا بيانات تحليل كافية)")
                     stop.wait(timeout=1.0)
-                continue
+                if direction == "wait":
+                    continue
             else:
                 skips = 0
 
             last_used_asset  = chosen_asset
             S["last_signal"] = direction
-
-            # ── توقيت الإرسال
-            wait_for_minute_start(stop)
-            if stop.is_set(): break
-
-            log.info(f"🎯 {direction.upper()} | {datetime.now().strftime('%H:%M:%S')}")
-
-            # ── تسجيل/تنفيذ الصفقة ─────────────────────────────────────────
-            opened_trades = []
-            trade = {
-                "id":         int(time.time() * 1000),
-                "asset":      chosen_asset,
-                "direction":  direction,
-                "amount":     req.amount,
-                "duration":   60,
-                "status":     "pending",
-                "profit":     0,
-                "started_at": datetime.now().isoformat(),
-                "account":    req.account_type,
-                "strategy":   req.strategy,
-            }
-            S["current_trade"] = trade
-            tid = None
-            if QX and S["logged_in"] and S["client"]:
-                r = run_async_for(S["email"], _do_trade(S["client"],chosen_asset,req.amount,
-                                        direction,req.account_type), 20)
-                if r["ok"]:
-                    tid = r.get("id")
-                else:
-                    msg = str(r.get("msg",""))
-                    log.warning(f"⚠️ {msg}")
-                    if "not_money" in msg.lower():
-                        log.warning("💸 رصيد غير كافٍ — توقف")
-                        S["current_trade"] = None
-                        stop.set()
-                        break
-                    continue
-            else:
-                log.info(f"🔵 محاكاة {chosen_asset} {direction.upper()}")
-            opened_trades.append((trade, tid))
-
-            if stop.is_set():
-                break
-            if not opened_trades:
-                S["current_trade"] = None
-                stop.wait(timeout=2.0)
+            entry_key = f"{chosen_asset}:{direction}:{req.account_type}"
+            now_entry = time.time()
+            if (
+                S.get("_last_entry_key") == entry_key
+                and (now_entry - float(S.get("_last_entry_ts", 0) or 0)) < entry_cooldown_sec
+            ):
+                left_cd = int(entry_cooldown_sec - (now_entry - float(S.get("_last_entry_ts", 0) or 0)))
+                log.info("⏸️ تجاهل تكرار صفقة %s — تبقّى %ss", entry_key, max(1, left_cd))
+                stop.wait(timeout=1.0)
+                continue
+            # لا تحاول نفس الإشارة أكثر من مرة في نفس الدقيقة
+            candle_bucket = int(now_entry // 60)
+            signal_key = f"{entry_key}:{candle_bucket}"
+            if signal_key in signal_attempted:
+                stop.wait(timeout=1.0)
+                continue
+            # تنظيف قديم
+            if len(signal_attempted) > 300:
+                cutoff = int(time.time()) - 600
+                for k, ts in list(signal_attempted.items()):
+                    if ts < cutoff:
+                        signal_attempted.pop(k, None)
+            signal_attempted[signal_key] = int(now_entry)
+            # تحقّق نافذة الدخول: فقط إذا الوقت المتبقي بين 59 و90 ثانية.
+            now_dt = datetime.now()
+            sec_left_this = 60.0 - (now_dt.second + now_dt.microsecond / 1_000_000)
+            # بعض المنصات تنفّذ على الدورة التالية؛ نعتبر نافذة الدورة التالية أيضاً.
+            sec_left_next = sec_left_this + 60.0
+            eff_left = sec_left_this if sec_left_this >= entry_window_min_sec else sec_left_next
+            if not (entry_window_min_sec <= eff_left <= entry_window_max_sec):
+                S["status_msg"] = (
+                    f"⏸️ تخطّي الإشارة: نافذة الدخول خارج المدى "
+                    f"({eff_left:.1f}s، المطلوب {entry_window_min_sec:.0f}-{entry_window_max_sec:.0f}s)"
+                )
+                log.info(
+                    "⏸️ skip entry: left_this=%.2fs left_next=%.2fs eff=%.2fs (required %.0f-%.0fs)",
+                    sec_left_this, sec_left_next, eff_left, entry_window_min_sec, entry_window_max_sec
+                )
+                stop.wait(timeout=1.0)
                 continue
 
-            # ── انتظار 60 ثانية كاملة ─────────────────────────────────────
-            log.info("⏳ انتظار 60 ثانية...")
-            # جمع أسعار أثناء الانتظار
-            trade_end = time.time() + 60
-            while time.time() < trade_end and not stop.is_set():
+            # ── تنفيذ فوري عند ظهور الإشارة (بدون انتظار بداية الدقيقة)
+            log.info(
+                f"🎯 {direction.upper()} | تنفيذ فوري | {datetime.now().strftime('%H:%M:%S')} | مدة={trade_duration_sec}s"
+            )
+
+            _dlim = _demo_trades_daily_limit()
+            if req.account_type == "demo" and _dlim > 0:
+                _dct = _demo_trades_today_count(S.get("email") or "")
+                if _dct >= _dlim:
+                    msg = (
+                        f"🛑 وصلت الحد اليومي لصفقات التجريبي ({_dlim} صفقات). توقّف البوت."
+                    )
+                    log.info(msg)
+                    S["status_msg"] = msg
+                    S["running"] = False
+                    stop.set()
+                    break
+
+            # ── تسجيل/تنفيذ الصفقات (Burst) ────────────────────────────────
+            opened_trades = []
+            for i in range(max(1, int(burst_count))):
+                trade = {
+                    "id":         int(time.time()*1000) + i,
+                    "asset":      chosen_asset,
+                    "direction":  direction,
+                    "amount":     req.amount,
+                    "duration":   trade_duration_sec,
+                    "status":     "pending",
+                    "profit":     0,
+                    "started_at": datetime.now().isoformat(),
+                    "account":    req.account_type,
+                    "strategy":   req.strategy,
+                }
+                S["current_trade"] = trade
+                tid = None
+                if QX and S["logged_in"] and S["client"]:
+                    _buy_retry_enabled = os.getenv("BOT_BUY_RETRY_ON_TIMEOUT", "1").strip().lower() in ("1", "true", "yes", "on")
+                    _buy_retry_timeout = float(os.getenv("BOT_BUY_RETRY_TIMEOUT_SEC", "18") or 18)
+                    _buy_retry_timeout = max(8.0, min(_buy_retry_timeout, 35.0))
+                    _buy_call_timeout = float(os.getenv("BOT_BUY_CALL_TIMEOUT_SEC", "35") or 35)
+                    _buy_call_timeout = max(10.0, min(_buy_call_timeout, 120.0))
+                    try:
+                        r = run_async_for(
+                            S["email"],
+                            _do_trade(
+                                S["client"],
+                                chosen_asset,
+                                req.amount,
+                                direction,
+                                req.account_type,
+                                trade_duration_sec,
+                            ),
+                            _buy_call_timeout,
+                        )
+                    except TimeoutError:
+                        if _buy_retry_enabled:
+                            log.warning("⚠️ Timeout أثناء buy — إعادة محاولة أخيرة")
+                            try:
+                                time.sleep(1.0)
+                                r = run_async_for(
+                                    S["email"],
+                                    _do_trade(
+                                        S["client"],
+                                        chosen_asset,
+                                        req.amount,
+                                        direction,
+                                        req.account_type,
+                                        trade_duration_sec,
+                                    ),
+                                    _buy_retry_timeout,
+                                )
+                            except Exception:
+                                S["status_msg"] = "⏸️ تعذر تنفيذ الصفقة (مهلة اتصال Quotex) — تخطي الإشارة"
+                                log.warning("⚠️ Timeout أثناء buy حتى بعد إعادة المحاولة — تخطّي الإشارة الحالية")
+                                continue
+                        else:
+                            S["status_msg"] = "⏸️ تعذر تنفيذ الصفقة (مهلة اتصال Quotex) — تخطي الإشارة"
+                            log.warning("⚠️ Timeout أثناء buy — تخطّي الإشارة الحالية")
+                            continue
+                    except Exception as ex:
+                        S["status_msg"] = "⏸️ تعذر تنفيذ الصفقة حالياً — تخطي الإشارة"
+                        log.warning("⚠️ buy failed: %s", ex)
+                        continue
+                    if not r.get("ok"):
+                        _msg0 = str(r.get("msg", "") or "").strip()
+                        if _buy_retry_enabled and _msg0.lower() in ("", "none", "null"):
+                            log.warning("⚠️ نتيجة buy غير واضحة (%s) — إعادة محاولة أخيرة", _msg0 or "empty")
+                            try:
+                                time.sleep(1.0)
+                                r2 = run_async_for(
+                                    S["email"],
+                                    _do_trade(
+                                        S["client"],
+                                        chosen_asset,
+                                        req.amount,
+                                        direction,
+                                        req.account_type,
+                                        trade_duration_sec,
+                                    ),
+                                    _buy_retry_timeout,
+                                )
+                                if isinstance(r2, dict):
+                                    r = r2
+                            except Exception:
+                                S["status_msg"] = "⏸️ تعذر تنفيذ الصفقة (استجابة غير واضحة من Quotex) — تخطي الإشارة"
+                                log.warning("⚠️ buy ambiguous حتى بعد إعادة المحاولة — تخطّي الإشارة الحالية")
+                                continue
+                    if r.get("ok"):
+                        tid = r.get("id")
+                    else:
+                        msg = str(r.get("msg", "") or "").strip()
+                        if msg.lower() in ("", "none", "null"):
+                            msg = "تعذر تأكيد تنفيذ الصفقة من المنصة (رد غير واضح)"
+                        log.warning(f"⚠️ {msg}")
+                        if _is_time_insufficient_msg(msg):
+                            S["status_msg"] = "⏸️ المنصة رفضت الدخول: الوقت غير كافٍ لهذه الإشارة"
+                            break
+                        if "not_money" in msg.lower():
+                            log.warning("💸 رصيد غير كافٍ — توقف")
+                            S["current_trade"] = None
+                            stop.set()
+                            break
+                        continue
+                else:
+                    log.info(f"🔵 محاكاة {chosen_asset} {direction.upper()} ({i+1}/{max(1, int(burst_count))})")
+                opened_trades.append((trade, tid))
+
+            if not opened_trades:
+                S["current_trade"] = None
+                if _should_stop():
+                    break
+                stop.wait(timeout=2.0)
+                continue
+            # تم فتح صفقة فعلية — ثبّت بصمة آخر دخول لتجنّب التكرار السريع
+            S["_last_entry_key"] = entry_key
+            S["_last_entry_ts"] = time.time()
+            S["_last_trade_open_ts"] = time.time()
+            S["_last_forced_entry_try_ts"] = 0.0
+
+            # ── انتظار مدة الصفقة كاملة ───────────────────────────────────
+            # مع صفقات مفتوحة: لا نخرج مبكراً بسبب stop — وإلا تُفتح صفقات على Quotex ولا تُسجَّل في wins/losses
+            log.info("⏳ انتظار %s ثانية...", trade_duration_sec)
+            trade_end = time.time() + trade_duration_sec
+            while time.time() < trade_end:
                 if QX and S["client"]:
                     for a in all_assets:
                         _collect_price(S["client"], a, S["email"])
-                stop.wait(timeout=1)
-            if stop.is_set(): break
+                left = trade_end - time.time()
+                if left <= 0:
+                    break
+                stop.wait(timeout=min(1.0, left))
 
-            # ── النتائج ────────────────────────────────────────────────────
+            # ── النتائج لكل صفقة في الـ Burst ─────────────────────────────
             total_prf = 0.0
             for trade, tid in opened_trades:
-                if QX and tid and S["client"]:
-                    r2  = run_async_for(S["email"], _check_win(S["client"],tid), 15)
-                    win = r2["win"]
-                    prf = r2["profit"] if win else -(r2.get("profit",0) or req.amount)
-                else:
-                    win = random.random() < 0.58
-                    prf = round(req.amount*0.80,2) if win else -req.amount
+                stake = float(trade.get("amount") or req.amount or 0)
+                settled = False
+                try:
+                    if QX and tid and S["client"]:
+                        r2 = run_async_for(S["email"], _check_win(S["client"], tid), 25)
+                        win = r2["win"]
+                        prf = _session_trade_pnl(win, stake, float(r2.get("profit") or 0))
+                        settled = True
+                    else:
+                        win = random.random() < 0.58
+                        raw_sim = round(stake * 0.80, 2) if win else 0.0
+                        prf = _session_trade_pnl(win, stake, raw_sim)
+                        settled = True
+                except Exception as ex:
+                    if QX and tid and S["client"]:
+                        log.warning("⚠️ تعذر تسوية صفقة (id=%s): %s — إعادة محاولة أخيرة", tid, ex)
+                        try:
+                            time.sleep(2)
+                            r2 = run_async_for(S["email"], _check_win(S["client"], tid), 20)
+                            win = r2["win"]
+                            prf = _session_trade_pnl(win, stake, float(r2.get("profit") or 0))
+                            settled = True
+                            log.info("✅ تمّت تسوية الصفقة بعد إعادة المحاولة (id=%s)", tid)
+                        except Exception as ex2:
+                            log.warning(
+                                "⚠️ تعذر تسوية صفقة (id=%s): %s — ستبقى معلّقة بدون احتساب خسارة تقديرية",
+                                tid, ex2
+                            )
+                            settled = False
+                    else:
+                        win = False
+                        prf = _session_trade_pnl(False, stake, 0.0)
+                        settled = True
 
-                prf = round(prf,2)
+                if not settled:
+                    trade.update({
+                        "status": "pending",
+                        "profit": 0.0,
+                        "ended_at": datetime.now().isoformat(),
+                        "settlement_pending": True,
+                    })
+                    S["trades"].insert(0, dict(trade))
+                    if len(S["trades"]) > 200:
+                        S["trades"].pop()
+                    log.info("🕒 صفقة معلّقة بانتظار نتيجة المنصة (id=%s)", tid)
+                    continue
+
+                prf = round(prf, 2)
                 total_prf += prf
-                trade.update({"status":"win" if win else "loss",
-                              "profit":prf,"ended_at":datetime.now().isoformat()})
+                trade.update({"status": "win" if win else "loss",
+                              "profit": prf, "ended_at": datetime.now().isoformat()})
                 S["trades"].insert(0, dict(trade))
-                if len(S["trades"]) > 200: S["trades"].pop()
+                if len(S["trades"]) > 200:
+                    S["trades"].pop()
 
-                if win: S["wins"]+=1;   log.info(f"✅ فوز +{prf}")
-                else:   S["losses"]+=1; log.info(f"❌ خسارة {prf}")
+                if win:
+                    S["wins"] += 1
+                    log.info(f"✅ فوز +{prf}")
+                else:
+                    S["losses"] += 1
+                    log.info(f"❌ خسارة {prf}")
 
             S["current_trade"] = None
 
@@ -2538,26 +4533,24 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
             if QX and S["client"]:
                 mode = "REAL" if req.account_type=="real" else "PRACTICE"
                 prev_bal = S["real_balance"] if req.account_type=="real" else S["demo_balance"]
-                # انتظار حتى يتغير الرصيد فعلاً في المنصة
-                log.info(f"⏳ انتظار تحديث الرصيد (الرصيد قبل: {prev_bal})")
-                for wait_attempt in range(20):
-                    time.sleep(3)
+                # قراءة سريعة غير حاجزة: لا ننتظر دقيقة كاملة حتى لا تتأخر الدورة
+                for wait_attempt in range(2):
                     try:
-                        bal = run_async_for(S["email"], _get_single_balance(S["client"],mode), 12)
-                        if bal > 0 and bal != prev_bal:
+                        bal = run_async_for(S["email"], _get_single_balance(S["client"], mode), 8)
+                        if bal > 0:
                             current_bal = bal
-                            log.info(f"💰 رصيد تحدّث (محاولة {wait_attempt+1}): {prev_bal} → {current_bal}")
-                            break
-                        elif bal > 0:
-                            log.info(f"⏳ رصيد لم يتغير بعد: {bal} (محاولة {wait_attempt+1})")
-                            current_bal = bal
-                    except: pass
+                            if bal != prev_bal:
+                                log.info(f"💰 رصيد تحدّث سريعاً: {prev_bal} → {current_bal}")
+                                break
+                    except Exception:
+                        pass
+                    time.sleep(1)
                 if current_bal > 0:
                     if req.account_type=="real": S["real_balance"] = current_bal
                     else: S["demo_balance"] = current_bal
                 else:
                     current_bal = prev_bal
-                    log.warning("⚠️ لم يتم تحديث الرصيد")
+                    log.info("ℹ️ الرصيد لم يتحدّث فوراً — المتابعة بدون تأخير")
             else:
                 # محاكاة
                 if req.account_type == "demo":
@@ -2567,10 +4560,24 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
                     S["real_balance"] = round((S.get("real_balance") or start_bal) + total_prf, 2)
                     current_bal = S["real_balance"]
 
-            # الربح الحقيقي = رصيد المنصة الحالي - رصيد البداية فقط
-            real_profit = round(current_bal - start_bal, 2)
+            # صافي الجلسة يجب أن يساوي مجموع أرباح/خسائر الصفقات المسجّلة فعلياً
+            # (أدق من الاعتماد على فرق الرصيد فقط عند تأخر تحديث المنصة)
+            real_profit = round(sum(float(t.get("profit", 0) or 0) for t in S["trades"]), 2)
             S["session_profit"] = real_profit
-            log.info(f"💰 رصيد={current_bal} | بداية={start_bal} | ربح={real_profit:+.2f}")
+            bal_delta = round(current_bal - start_bal, 2)
+            log.info(
+                f"💰 رصيد={current_bal} | بداية={start_bal} | Δرصيد={bal_delta:+.2f} | صافي صفقات={real_profit:+.2f}"
+            )
+
+            if req.account_type == "demo" and _dlim > 0 and opened_trades:
+                new_c = _demo_trades_increment(S.get("email") or "", len(opened_trades))
+                if new_c >= _dlim:
+                    msg = f"🛑 وصلت الحد اليومي لصفقات التجريبي ({_dlim} صفقات). توقّف البوت."
+                    log.info(msg)
+                    S["status_msg"] = msg
+                    S["running"] = False
+                    stop.set()
+                    break
 
             # ── فحص الحدود ────────────────────────────────────────────────
             if req.profit_limit > 0 and real_profit >= req.profit_limit:
@@ -2587,42 +4594,98 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
                 S["running"] = False
                 stop.set(); break
 
+            if _should_stop():
+                log.info("🛑 إيقاف بعد تسوية الصفقات — خروج من حلقة البوت")
+                break
+
             # صفقة كل دقيقة — لا انتظار إضافي
 
         except Exception as e:
             log.error(f"خطأ:\n{traceback.format_exc()}")
             stop.wait(timeout=6)
 
-    S["running"] = False
-    S["current_trade"] = None
-    log.info(f"🤖 توقف: {S['email']}")
+    # لا تُطفئ الجلسة إن كان هذا worker قديماً (بعد إعادة تشغيل ذاتية)
+    if S.get("stop_event") is stop:
+        S["running"] = False
+        S["current_trade"] = None
+        if S.get("logged_in"):
+            S["_no_bot_since"] = time.time()
+        log.info(f"🤖 توقف: {S['email']}")
+    else:
+        log.info("♻️ إنهاء worker قديم بعد إعادة تشغيل تلقائية (%s)", S.get("email", "_"))
 
 # ══════════════════════════════════════════════════════════════════════════════
 # FastAPI
 # ══════════════════════════════════════════════════════════════════════════════
 @asynccontextmanager
-async def _app_lifespan(app: FastAPI):
+async def _app_lifespan(_app: FastAPI):
     _configure_quiet_loggers()
     yield
 
 
-app = FastAPI(title="Abood Trader", lifespan=_app_lifespan)
+app = FastAPI(title="NEXORA TRADE", lifespan=_app_lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=ALLOWED_ORIGINS,
                    allow_methods=["*"], allow_headers=["*"])
 
-_DIR = os.path.dirname(__file__)
-_fe = os.path.join(_DIR, "frontend.html")
-_ad = os.path.join(_DIR, "admin.html")
-_STATIC = os.path.join(_DIR, "static")
+if os.getenv("DEBUG_API_LOG", "").strip().lower() in ("1", "true", "yes"):
+    @app.middleware("http")
+    async def _log_api_requests(request, call_next):
+        if request.url.path.startswith("/api"):
+            log.info("➡️ API %s %s", request.method, request.url.path)
+        return await call_next(request)
 
 
-def _static_file(rel: str, media_type: str):
-    p = os.path.join(_STATIC, rel)
-    if not os.path.isfile(p):
-        raise HTTPException(404, "الملف غير موجود")
-    return FileResponse(p, media_type=media_type)
+@app.middleware("http")
+async def _maintenance_mode_guard(request, call_next):
+    path = request.url.path or "/"
+    if path.startswith("/admin") or path.startswith("/api/admin"):
+        return await call_next(request)
+    st = _admin_settings_dict()
+    if not bool(st.get("maintenance_mode", False)):
+        return await call_next(request)
+    _bypass_set_cookie = False
+    if MAINTENANCE_BYPASS_TOKEN:
+        q = str(request.query_params.get("mb", "") or "").strip()
+        h = str(request.headers.get("x-maintenance-bypass", "") or "").strip()
+        c = str(request.cookies.get(MAINTENANCE_BYPASS_COOKIE, "") or "").strip()
+        is_bypass = (
+            secrets.compare_digest(q, MAINTENANCE_BYPASS_TOKEN)
+            or secrets.compare_digest(h, MAINTENANCE_BYPASS_TOKEN)
+            or secrets.compare_digest(c, MAINTENANCE_BYPASS_TOKEN)
+        )
+        if is_bypass:
+            _bypass_set_cookie = (
+                (secrets.compare_digest(q, MAINTENANCE_BYPASS_TOKEN) or secrets.compare_digest(h, MAINTENANCE_BYPASS_TOKEN))
+                and not secrets.compare_digest(c, MAINTENANCE_BYPASS_TOKEN)
+            )
+            resp = await call_next(request)
+            if _bypass_set_cookie:
+                resp.set_cookie(
+                    MAINTENANCE_BYPASS_COOKIE,
+                    MAINTENANCE_BYPASS_TOKEN,
+                    max_age=7 * 24 * 3600,
+                    httponly=True,
+                    samesite="lax",
+                )
+            return resp
+    if path.startswith("/api"):
+        return JSONResponse(
+            status_code=503,
+            content={
+                "success": False,
+                "maintenance": True,
+                "detail": "النظام تحت الصيانة حالياً. الرجاء المحاولة لاحقاً.",
+            },
+        )
+    return HTMLResponse(MAINTENANCE_HTML, status_code=503)
+
+APP_DIR = os.path.dirname(os.path.abspath(__file__))
+_fe = os.path.join(APP_DIR, "frontend.html")
+_ad = os.path.join(APP_DIR, "admin.html")
+_mh = os.path.join(APP_DIR, "maintenance.html")
 HTML  = open(_fe,encoding="utf-8").read() if os.path.exists(_fe) else "<h1>frontend.html مفقود</h1>"
 ADMIN = open(_ad,encoding="utf-8").read() if os.path.exists(_ad) else "<h1>admin.html مفقود</h1>"
+MAINTENANCE_HTML = open(_mh, encoding="utf-8").read() if os.path.exists(_mh) else "<h1>النظام تحت الصيانة</h1>"
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -2631,37 +4694,81 @@ async def ui(): return HTML
 @app.get("/admin", response_class=HTMLResponse)
 async def admin_ui(): return ADMIN
 
+
 @app.get("/manifest.json")
-async def manifest_json():
-    p = os.path.join(_DIR, "manifest.json")
+async def pwa_manifest():
+    p = os.path.join(APP_DIR, "manifest.json")
     if not os.path.isfile(p):
-        raise HTTPException(404, "manifest غير موجود")
-    return FileResponse(p, media_type="application/manifest+json")
+        raise HTTPException(404, "manifest.json مفقود")
+    return FileResponse(
+        p,
+        media_type="application/manifest+json",
+        headers={"Cache-Control": "public, max-age=300, must-revalidate"},
+    )
+
+
+@app.get("/sw.js")
+async def pwa_service_worker():
+    p = os.path.join(APP_DIR, "sw.js")
+    if not os.path.isfile(p):
+        raise HTTPException(404, "sw.js مفقود")
+    return FileResponse(
+        p,
+        media_type="application/javascript",
+        headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+    )
+
+
+def _icon_response(name: str) -> FileResponse:
+    p = os.path.join(APP_DIR, name)
+    if not os.path.isfile(p):
+        raise HTTPException(404, f"{name} مفقود")
+    return FileResponse(
+        p,
+        media_type="image/png",
+        headers={"Cache-Control": "public, max-age=3600, must-revalidate"},
+    )
 
 
 @app.get("/icon-192.png")
 async def pwa_icon_192():
-    return _static_file("icon-192.png", "image/png")
+    return _icon_response("icon-192.png")
 
 
 @app.get("/icon-512.png")
 async def pwa_icon_512():
-    return _static_file("icon-512.png", "image/png")
+    return _icon_response("icon-512.png")
 
 
-@app.get("/screenshot-wide.png")
-async def pwa_screenshot_wide():
-    return _static_file("screenshot-wide.png", "image/png")
+@app.get("/pwa/icon-192.png")
+async def pwa_public_icon_192():
+    """مسار ثابت للـ PWA/APK — يُفضّل في manifest لتوافق PWABuilder والكاش."""
+    return _icon_response("icon-192.png")
 
 
-@app.get("/screenshot-narrow.png")
+@app.get("/pwa/icon-512.png")
+async def pwa_public_icon_512():
+    return _icon_response("icon-512.png")
+
+
+@app.get("/pwa/screenshot-narrow.png")
+async def pwa_public_shot_narrow():
+    return _icon_response("pwa-screenshot-narrow.png")
+
+
+@app.get("/pwa/screenshot-wide.png")
+async def pwa_public_shot_wide():
+    return _icon_response("pwa-screenshot-wide.png")
+
+
+@app.get("/pwa-screenshot-narrow.png")
 async def pwa_screenshot_narrow():
-    return _static_file("screenshot-narrow.png", "image/png")
+    return _icon_response("pwa-screenshot-narrow.png")
 
 
-@app.get("/sw.js")
-async def service_worker():
-    return _static_file("sw.js", "application/javascript")
+@app.get("/pwa-screenshot-wide.png")
+async def pwa_screenshot_wide():
+    return _icon_response("pwa-screenshot-wide.png")
 
 # ── Admin ─────────────────────────────────────────────────────────────────────
 @app.post("/api/admin/login")
@@ -2670,6 +4777,50 @@ async def admin_login(req: AdminLoginReq):
     t = secrets.token_hex(16)
     _persist_admin_token(t)
     return {"success": True, "token": t}
+
+@app.get("/api/admin/settings")
+async def admin_get_settings(admin_token: str):
+    if admin_token not in ADMIN_TOKENS:
+        raise HTTPException(403, "غير مصرح")
+    st = _admin_settings_dict()
+    return {
+        "demo_max_trades_per_day": st.get("demo_max_trades_per_day", 5),
+        "real_min_balance_usd": REAL_MIN_BALANCE_USD,
+        "maintenance_mode": bool(st.get("maintenance_mode", False)),
+        "maintenance_updated_at": st.get("maintenance_updated_at", ""),
+    }
+
+@app.post("/api/admin/settings")
+async def admin_post_settings(req: AdminSettingsReq):
+    if req.admin_token not in ADMIN_TOKENS:
+        raise HTTPException(403, "غير مصرح")
+    lim = int(req.demo_max_trades_per_day)
+    if lim < 0:
+        lim = 0
+    st = _admin_settings_dict()
+    st["demo_max_trades_per_day"] = lim
+    _save_admin_settings_dict(st)
+    log.info("⚙️ إعدادات المسؤول: demo_max_trades_per_day=%s", lim)
+    return {"success": True, "demo_max_trades_per_day": lim}
+
+
+@app.post("/api/admin/maintenance")
+async def admin_set_maintenance(req: AdminMaintenanceReq):
+    if req.admin_token not in ADMIN_TOKENS:
+        raise HTTPException(403, "غير مصرح")
+    want_enable = bool(req.enabled)
+    if want_enable and str(req.activation_password or "") != MAINTENANCE_ACTIVATION_PW:
+        raise HTTPException(403, "كلمة مرور تفعيل الصيانة غير صحيحة")
+    st = _admin_settings_dict()
+    st["maintenance_mode"] = want_enable
+    st["maintenance_updated_at"] = datetime.now(timezone.utc).isoformat()
+    _save_admin_settings_dict(st)
+    log.warning("🛠️ Maintenance mode changed: %s", "ON" if want_enable else "OFF")
+    return {
+        "success": True,
+        "maintenance_mode": want_enable,
+        "maintenance_updated_at": st["maintenance_updated_at"],
+    }
 
 @app.get("/api/admin/users")
 async def admin_users(admin_token: str):
@@ -2688,6 +4839,23 @@ async def admin_users(admin_token: str):
             "candle_source":S.get("candle_source","") if S else "",
         })
     return {"users":result}
+
+@app.get("/api/admin/sessions")
+async def admin_sessions(admin_token: str, limit: int = 300):
+    if admin_token not in ADMIN_TOKENS:
+        raise HTTPException(403, "غير مصرح")
+    lim = max(10, min(int(limit or 300), 2000))
+    arr = _load_ux_sessions()
+    # الأحدث أولاً
+    try:
+        arr = sorted(
+            arr,
+            key=lambda x: (x.get("started_at") or "") if isinstance(x, dict) else "",
+            reverse=True,
+        )
+    except Exception:
+        arr = list(reversed(arr))
+    return {"sessions": arr[:lim]}
 
 @app.post("/api/admin/approve")
 async def admin_approve(req: ApproveReq):
@@ -2725,8 +4893,14 @@ async def admin_delete(req: ApproveReq):
     if S:
         S["stop_event"].set()
         S["running"] = False
+        if S.get("logged_in"):
+            try:
+                run_async_for(req.email, _ux_refresh_balances_before_logout(S), 15)
+            except Exception:
+                pass
+            _ux_session_close(S)
         if S.get("client"):
-            try: run_async_for(req.email, _close(S["client"]), _CLOSE_CLIENT_TIMEOUT_SEC)
+            try: run_async_for(req.email, _close(S["client"]), 5)
             except: pass
     # حذف من SESSIONS
     token = USERS[req.email].get("session_token","")
@@ -2740,17 +4914,21 @@ async def admin_delete(req: ApproveReq):
 
 # ── User ──────────────────────────────────────────────────────────────────────
 @app.post("/api/register")
-async def register(req: RegisterReq):
+async def register(req: RegisterReq, background_tasks: BackgroundTasks):
     if "@" not in req.email: raise HTTPException(400,"بريد غير صحيح")
     if req.email in USERS:
         s = USERS[req.email]["status"]
         msgs = {"approved":"حسابك مفعّل — سجّل دخولك",
                 "pending":"طلبك قيد المراجعة","rejected":"تم رفض طلبك"}
         return {"success":False,"status":s,"message":msgs.get(s,"")}
+    registered_at = datetime.now().isoformat()
     USERS[req.email] = {"name":req.name,"status":"pending",
-        "registered_at":datetime.now().isoformat(),"session_token":"","approved_at":"","note":""}
+        "registered_at":registered_at,"session_token":"","approved_at":"","note":""}
     save_users()
     log.info(f"📝 طلب: {req.email}")
+    background_tasks.add_task(
+        _notify_telegram_new_registration, req.email, req.name or "", registered_at
+    )
     return {"success":True,"status":"pending","message":"تم إرسال طلبك — انتظر موافقة المسؤول"}
 
 @app.get("/api/check_status")
@@ -2772,48 +4950,132 @@ async def check_status(email: str):
 
 @app.post("/api/login")
 async def login(req: LoginReq):
-    if "@" not in req.email: raise HTTPException(400,"بريد غير صحيح")
-    if len(req.password)<4:  raise HTTPException(400,"كلمة مرور قصيرة")
-    if req.email not in USERS: raise HTTPException(403,"غير مسجّل — أرسل طلب انضمام")
-    if USERS[req.email]["status"] != "approved":
-        raise HTTPException(403,"لم يتم قبول طلبك بعد")
-    if USERS[req.email].get("session_token","") != req.token:
-        raise HTTPException(403,"انتهت الجلسة — تحقق من الحالة مرة أخرى")
+    qx_email = (req.email or "").strip()
+    if "@" not in qx_email:
+        raise HTTPException(400, "بريد غير صحيح")
+    if len(req.password) < 4:
+        raise HTTPException(400, "كلمة مرور قصيرة")
+    email_key = _resolve_user_email(qx_email)
+    if not email_key:
+        raise HTTPException(403, "غير مسجّل — أرسل طلب انضمام")
+    if USERS[email_key]["status"] != "approved":
+        raise HTTPException(403, "لم يتم قبول طلبك بعد")
+    if USERS[email_key].get("session_token", "") != req.token:
+        raise HTTPException(
+            403,
+            "انتهت الجلسة أو الرمز غير متطابق — من صفحة التسجيل اضغط «تحقق من الحالة» بالبريد نفسه ثم أعد تسجيل الدخول",
+        )
     S = get_session(req.token)
     if not S:
-        SESSIONS[req.token] = new_session(req.email)
+        SESSIONS[req.token] = new_session(email_key)
         S = SESSIONS[req.token]
     if QX:
+        if S.get("logged_in"):
+            _ux_finalize_open_for_email(
+                email_key,
+                float(S.get("real_balance") or 0),
+                float(S.get("demo_balance") or 0),
+                float(S.get("session_profit") or 0),
+                str(S.get("currency") or "USD"),
+            )
+            S.pop("_ux_session_id", None)
         if S.get("client"):
-            try: run_async_for(req.email, _close(S["client"]), _CLOSE_CLIENT_TIMEOUT_SEC)
-            except: pass
-        S["email"] = req.email
+            try:
+                run_async_for(email_key, _close(S["client"]), 5)
+            except Exception:
+                pass
+        S["email"] = email_key
         S["needs_pin"] = False
         S["login_error"] = ""
-        S["logged_in"] = False
-        S["_login_gen"] = int(S.get("_login_gen", 0) or 0) + 1
-        _lg = S["_login_gen"]
-        S["login_pending"] = True
-        drain_pin_queue(req.email)
-        # إرجاع فوري — Cloudflare/Nginx يقطعان الطلبات الطويلة (504). الواجهة تستطلع /api/status.
-        _loop = get_session_loop(req.email)
+        drain_pin_queue(email_key)
+        # connect() يستدعي input() ويُعلّق على queue حتى يصل PIN من /api/pin.
+        # إذا انتظرنا result(150) هنا، لا تُرسل الاستجابة أبداً → الواجهة لا تظهر حقل PIN.
+        _loop = get_session_loop(email_key)
         _fut = asyncio.run_coroutine_threadsafe(
-            _login_qx(req.email, req.password, S), _loop
+            _login_qx(email_key, req.password, S), _loop
         )
-        _fut.add_done_callback(lambda f: _on_qx_login_future_done(req.email, S, _lg, f))
-        return {
-            "success": True,
-            "pending": True,
-            "message": "جاري الاتصال بـ Quotex… راقب الحالة من الواجهة",
-        }
+        _deadline = time.monotonic() + 150
+        r = None
+        while time.monotonic() < _deadline:
+            if _fut.done():
+                try:
+                    r = _fut.result()
+                except Exception as e:
+                    log.exception("login: نتيجة مهمة الدخول")
+                    raise HTTPException(500, str(e) or "فشل تسجيل الدخول")
+                break
+            if S.get("needs_pin"):
+                return {
+                    "success": False,
+                    "needs_pin": True,
+                    "message": "أدخل رمز التحقق (PIN) المرسل إلى بريدك أو تطبيق Quotex",
+                }
+            await asyncio.sleep(0.15)
+        else:
+            raise HTTPException(408, "انتهت مهلة تسجيل الدخول — أعد المحاولة")
+        if r.get("pin"):
+            S["needs_pin"]=True
+            return {"success":False,"needs_pin":True,"message":r.get("msg") or "أدخل PIN"}
+        if not r["ok"]:
+            msg = str(r.get("msg") or "").strip()
+            if not msg or msg.lower() in ("false", "none", "unknown", "unknown error"):
+                msg = _DEFAULT_QX_LOGIN_FAIL
+            # عند فشل Quotex لا ندخل محاكاة تلقائياً: يجب أن يكون الدخول حقيقي فقط.
+            ml = msg.lower()
+            blocked_region = any(
+                x in ml
+                for x in (
+                    "service unavailable",
+                    "not available in your region",
+                    "your region",
+                    "cloudflare",
+                    "websocket",
+                    "handshake status 403",
+                    "403 forbidden",
+                    "connection reset",
+                    "connection refused",
+                    "timed out",
+                    "timeout",
+                    "ssl",
+                    "certificate",
+                    "network is unreachable",
+                    "errno",
+                )
+            )
+            if blocked_region:
+                raise HTTPException(
+                    403,
+                    "خطأ حاول مرة أخرى خلال دقيقة",
+                )
+            log.warning("login Quotex فشل: %s", msg[:500])
+            raise HTTPException(401, msg)
+        S["client"]=r["client"]; S["real_balance"]=r["real"]
+        S["demo_balance"]=r["demo"]; S["currency"]=r.get("cur","USD")
     else:
+        if S.get("logged_in"):
+            _ux_finalize_open_for_email(
+                email_key,
+                float(S.get("real_balance") or 0),
+                float(S.get("demo_balance") or 0),
+                float(S.get("session_profit") or 0),
+                str(S.get("currency") or "USD"),
+            )
+            S.pop("_ux_session_id", None)
         S["real_balance"]=0.0; S["demo_balance"]=10_000.0; S["currency"]="USD"
-    S["logged_in"]=True; S["needs_pin"]=False; S["email"]=req.email
+    S["logged_in"]=True; S["needs_pin"]=False; S["email"]=email_key
+    S["_no_bot_since"] = time.time()
     S["status_msg"] = ""
-    return {"success":True,"needs_pin":False,"email":req.email,
-            "user_id":abs(hash(req.email))%90_000_000+10_000_000,
+    if not QX:
+        _ux_session_open(S)
+    _dlim_l = _demo_trades_daily_limit()
+    _dused_l = _demo_trades_today_count(email_key)
+    return {"success":True,"needs_pin":False,"email":email_key,
+            "user_id":abs(hash(email_key))%90_000_000+10_000_000,
             "real_balance":S["real_balance"],"demo_balance":S["demo_balance"],
-            "currency":S["currency"],"sim_mode":_is_session_sim_mode(S)}
+            "currency":S["currency"],"sim_mode":_is_session_sim_mode(S),
+            "demo_max_trades_per_day": _dlim_l,
+            "demo_trades_today": _dused_l,
+            "real_min_balance_usd": REAL_MIN_BALANCE_USD}
 
 @app.post("/api/pin")
 async def pin_ep(req: PinReq):
@@ -2824,8 +5086,17 @@ async def pin_ep(req: PinReq):
         raise HTTPException(400,"PIN قصير")
     if not QX:
         S["logged_in"]=True; S["needs_pin"]=False
+        S["_no_bot_since"] = time.time()
+        if not S.get("_ux_session_id"):
+            _ux_session_open(S)
+        _pk = S.get("email") or ""
+        _dlim_p = _demo_trades_daily_limit()
+        _dused_p = _demo_trades_today_count(_pk)
         return {"success":True,"email":S["email"],"user_id":12345678,
-                "real_balance":0.0,"demo_balance":10_000.0,"currency":"USD","sim_mode":True}
+                "real_balance":0.0,"demo_balance":10_000.0,"currency":"USD","sim_mode":True,
+                "demo_max_trades_per_day": _dlim_p,
+                "demo_trades_today": _dused_p,
+                "real_min_balance_usd": REAL_MIN_BALANCE_USD}
     get_pin_q(S["email"]).put(p)
     # إرجاع فوري حتى لا يقطع Nginx الطلب (504) بسبب proxy_read_timeout الافتراضي (~60s).
     # الواجهة تستطلع /api/status حتى يصبح logged_in=true بعد انتهاء connect() في الخلفية.
@@ -2836,21 +5107,47 @@ async def logout(req: TokenReq):
     S = get_session(req.token)
     if S:
         if S.get("running"): S["stop_event"].set(); S["running"]=False
+        if S.get("logged_in"):
+            try:
+                run_async_for(
+                    S.get("email") or "_",
+                    _ux_refresh_balances_before_logout(S),
+                    22,
+                )
+            except Exception:
+                pass
+            _ux_session_close(S)
         if S.get("client"):
-            try: run_async_for(S.get("email","_"), _close(S["client"]), _CLOSE_CLIENT_TIMEOUT_SEC)
+            try: run_async_for(S.get("email","_"), _close(S["client"]),5)
             except: pass
-        S.update({"logged_in":False,"needs_pin":False,"login_error":"","login_pending":False,
-                  "trades":[],"wins":0,"losses":0,"session_profit":0.0,"current_trade":None,
-                  "client":None})
-        S["_login_gen"] = int(S.get("_login_gen", 0) or 0) + 1
+        S.update({"logged_in":False,"needs_pin":False,"login_error":"","trades":[],"wins":0,
+                  "losses":0,"session_profit":0.0,"current_trade":None,"client":None,
+                  "_no_bot_since":0.0})
     return {"success":True}
 
 @app.post("/api/bot/start")
 async def start(req: BotReq):
     S = get_session(req.token)
     if not S: raise HTTPException(403,"جلسة غير صالحة")
+    _auto_logout_if_no_bot_too_long(S)
     if not S["logged_in"]: raise HTTPException(401,"سجّل الدخول أولاً")
     if S["running"]: raise HTTPException(400,"البوت يعمل بالفعل")
+    if (req.account_type or "").lower() == "real":
+        rb = float(S.get("real_balance") or 0.0)
+        if rb < REAL_MIN_BALANCE_USD:
+            raise HTTPException(
+                400,
+                f"رصيد الحساب الحقيقي ({rb:.2f} USD) أقل من الحد الأدنى المطلوب لتشغيل البوت ({REAL_MIN_BALANCE_USD:.0f} USD).",
+            )
+    if (req.account_type or "").lower() == "demo":
+        dlim = _demo_trades_daily_limit()
+        if dlim > 0:
+            cur = _demo_trades_today_count(S.get("email") or "")
+            if cur >= dlim:
+                raise HTTPException(
+                    400,
+                    f"وصلت الحد اليومي لصفقات الحساب التجريبي ({dlim} صفقات). يُتاح المزيد غداً أو استخدم الحساب الحقيقي.",
+                )
     # ── إعادة تعيين كاملة لكل جلسة جديدة ──────────────────────────────────
     # أوقف أي thread قديم أولاً
     old_stop = S.get("stop_event")
@@ -2870,6 +5167,7 @@ async def start(req: BotReq):
     S["current_trade"]  = None
     S["candles_ok"]     = False
     S["candle_source"]  = ""
+    S["_no_bot_since"]  = 0.0
     threading.Thread(target=bot_worker, args=(req,S,S["stop_event"]),
                      daemon=True).start()
     return {"success":True}
@@ -2882,37 +5180,64 @@ async def stop_ep(req: TokenReq):
         S["running"] = False
         S["status_msg"] = ""
         S["candle_source"] = ""
+        if S.get("logged_in"):
+            S["_no_bot_since"] = time.time()
     return {"success":True}
+
+@app.get("/api/assets")
+async def api_assets(token: str = ""):
+    """قائمة الأزواج المفتوحة على Quotex للواجهة — لا يغيّر تسجيل الدخول."""
+    S = get_session(token)
+    if not S:
+        return {"success": False, "detail": "جلسة غير صالحة"}
+    _auto_logout_if_no_bot_too_long(S)
+    if not S.get("logged_in"):
+        return {"success": False, "detail": "سجّل الدخول أولاً"}
+    if _is_session_sim_mode(S):
+        return {"success": False, "detail": "sim_mode"}
+    client = S.get("client")
+    if not client:
+        return {"success": False, "detail": "no_client"}
+    email = S.get("email") or "_"
+    try:
+        _to = float(os.getenv("QUOTEX_GET_ALL_ASSETS_TIMEOUT_SEC", "75") or 75)
+        _to = max(20.0, min(_to, 180.0))
+        otc, live, all_a, payouts = run_async_for(
+            email, _fetch_open_assets_for_ui(client), _to
+        )
+    except Exception as e:
+        log.warning("api/assets: %s", e)
+        return {"success": False, "detail": "تعذّر جلب الأزواج من المنصة"}
+    return {
+        "success": True,
+        "from_quotex": True,
+        "assets": {"otc": otc, "live": live, "all": all_a},
+        "payouts": payouts,
+    }
 
 @app.get("/api/status")
 async def status(token: str=""):
     S = get_session(token)
-    if not S:
-        return {
-            "logged_in": False,
-            "running": False,
-            "needs_pin": False,
-            "login_error": "",
-            "login_pending": False,
-        }
+    if not S: return {"logged_in":False,"running":False,"needs_pin":False,"login_error":""}
+    _auto_logout_if_no_bot_too_long(S)
+    _touch_no_bot_timer(S)
     # تحديث دوري للرصيدين من Quotex (لإظهار الرصيد الحقيقي حتى بدون تشغيل البوت).
     if QX and S.get("logged_in") and S.get("client"):
         now = time.time()
-        _rb = float(S.get("real_balance", 0) or 0)
-        _db = float(S.get("demo_balance", 0) or 0)
-        _bal_iv = 5.0 if (_rb <= 0 and _db <= 0) else 20.0
-        if now - float(S.get("_last_bal_sync_ts", 0.0) or 0.0) >= _bal_iv:
+        if now - float(S.get("_last_bal_sync_ts", 0.0) or 0.0) >= 20.0:
             try:
                 real, demo = await _get_balances(S["client"])
-                # لا تشترط real>0 — وإلا يبقى العرض 0.00 حتى لو اكتشفنا لاحقاً أن الرصيد صفر حقيقياً
-                S["real_balance"] = round(float(real), 2)
-                S["demo_balance"] = round(float(demo), 2)
+                if real > 0 or demo > 0:
+                    S["real_balance"] = round(float(real), 2)
+                    S["demo_balance"] = round(float(demo), 2)
                 S["_last_bal_sync_ts"] = now
             except Exception:
                 pass
     total = S["wins"]+S["losses"]
     _em = S.get("email") or ""
     _uid = abs(hash(_em)) % 90_000_000 + 10_000_000 if _em else 0
+    _dlim = _demo_trades_daily_limit()
+    _dused = _demo_trades_today_count(_em) if _em else 0
     return {
         "logged_in":      S["logged_in"],
         "needs_pin":      S["needs_pin"],
@@ -2936,22 +5261,30 @@ async def status(token: str=""):
         "candle_source":  S.get("candle_source",""),
         "status_msg":     S.get("status_msg",""),
         "login_error":    (S.get("login_error") or "")[:800],
-        "login_pending":  bool(S.get("login_pending")),
+        "demo_max_trades_per_day": _dlim,
+        "demo_trades_today":       _dused,
+        "demo_limit_reached":      bool(_dlim > 0 and _dused >= _dlim),
+        "real_min_balance_usd":    REAL_MIN_BALANCE_USD,
     }
 
 if __name__ == "__main__":
-    _acquire_single_instance_lock()
-    _log_quotex_proxy_if_enabled()
-    log.info("PID=%s — إذا تكرّر هذا السطر كل ثوانٍ فهناك عدة عمليات أو إعادة تشغيل تلقائية", os.getpid())
     log.info("ℹ️ للجلسات وPIN: شغّل عملية واحدة فقط (worker واحد) حتى لا تُفقد SESSIONS بين الطلبات")
-    log.info("🚀 Abood Trader — http://localhost:8000")
+    log.info("🚀 NEXORA TRADE — http://localhost:8000")
     log.info("👤 Admin: http://localhost:8000/admin")
     log.info(f"🌐 CORS origins: {ALLOWED_ORIGINS}")
     log.info(f"📦 pyquotex: {'✅' if QX else '❌ محاكاة'}")
     log.info(f"📦 pydantic : v{pydantic.VERSION}")
-    uvicorn.run(
-        app,
+    if os.getenv("TELEGRAM_BOT_TOKEN", "").strip() and os.getenv("TELEGRAM_CHANNEL_ID", "").strip():
+        log.info("📱 تيليجرام: إشعارات طلبات الانضمام → القناة مفعّلة")
+    _uv_kw = dict(
         host=os.getenv("HOST", "0.0.0.0"),
         port=int(os.getenv("PORT", "8000")),
         access_log=False,
     )
+    _cert = (os.getenv("UVICORN_SSL_CERTFILE") or "").strip()
+    _key = (os.getenv("UVICORN_SSL_KEYFILE") or "").strip()
+    if _cert and _key:
+        _uv_kw["ssl_certfile"] = _cert
+        _uv_kw["ssl_keyfile"] = _key
+        log.info("🔒 HTTPS: uvicorn SSL | cert=%s key=%s", _cert, _key)
+    uvicorn.run(app, **_uv_kw)
